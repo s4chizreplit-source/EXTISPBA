@@ -126,30 +126,41 @@ export async function seedAllData() {
   );
 
   // ── Post-seed cleanup ─────────────────────────────────────────────────────
-  // Mark stuck "processing" VPS historical orders as "partial".
-  // Only touches orders older than 30 minutes so active new orders are safe.
+
+  // 1. Mark stuck "processing" VPS historical orders as "partial".
   try {
-    const { rowCount } = await query(`
+    const { rowCount: r1 } = await query(`
       UPDATE public.engagement_orders
       SET    status = 'partial'
       WHERE  status = 'processing'
-        AND  created_at < NOW() - INTERVAL '30 minutes'
+        AND  order_number <= 2695
     `);
-    if (rowCount > 0) {
-      console.log(`[seed] cleanup: marked ${rowCount} stuck VPS orders as partial`);
-    }
+    if (r1 > 0) console.log(`[seed] cleanup: ${r1} VPS orders → partial`);
   } catch (e) {
-    console.error('[seed] cleanup failed:', e.message);
+    console.error('[seed] status cleanup failed:', e.message);
   }
 
-  // ── Advance order_number sequence past VPS range ────────────────────────
-  // Ensures next real production order gets a number >= 3800 (above VPS #2695)
+  // 2. Shift VPS order timestamps 90 days into the past so new production
+  //    orders always sort above them (API sorts by created_at DESC).
+  try {
+    const { rowCount: r2 } = await query(`
+      UPDATE public.engagement_orders
+      SET    created_at = created_at - INTERVAL '90 days'
+      WHERE  order_number <= 2695
+        AND  created_at > NOW() - INTERVAL '7 days'
+    `);
+    if (r2 > 0) console.log(`[seed] cleanup: shifted ${r2} VPS orders 90 days back`);
+  } catch (e) {
+    console.error('[seed] timestamp shift failed:', e.message);
+  }
+
+  // 3. Advance order_number sequence so next real production order >= 3800.
   try {
     const { rows } = await query(`SELECT MAX(order_number) AS mx FROM public.engagement_orders`);
     const maxOn = Number(rows[0]?.mx ?? 0);
     if (maxOn < 3800) {
       await query(`SELECT setval('engagement_orders_order_number_seq', 3800, false)`);
-      console.log(`[seed] sequence: advanced order_number seq to 3800 (was at ${maxOn})`);
+      console.log(`[seed] sequence: advanced to 3800 (was ${maxOn})`);
     }
   } catch (e) {
     console.error('[seed] sequence advance failed:', e.message);
