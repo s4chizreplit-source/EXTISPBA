@@ -83,6 +83,13 @@ pnpm --filter @organicsmm/server run dev   # API on :3000
 pnpm run dev                              # Vite dev server (proxy /api to :3000)
 ```
 
+## Replit preview
+
+The `Start application` workflow runs `npm run dev` and serves the React frontend on port 5000.
+The imported `.env` supplies its Supabase public connection values, so the frontend uses the
+existing Supabase project directly. The separate Express server requires a PostgreSQL
+`DATABASE_URL` and is not started by this preview workflow.
+
 ## API surface
 
 | Method | Path | Notes |
