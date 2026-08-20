@@ -125,5 +125,35 @@ export async function seedAllData() {
     }
   );
 
+  // ── Post-seed cleanup ─────────────────────────────────────────────────────
+  // Mark stuck "processing" VPS historical orders as "partial".
+  // Only touches orders older than 30 minutes so active new orders are safe.
+  try {
+    const { rowCount } = await query(`
+      UPDATE public.engagement_orders
+      SET    status = 'partial'
+      WHERE  status = 'processing'
+        AND  created_at < NOW() - INTERVAL '30 minutes'
+    `);
+    if (rowCount > 0) {
+      console.log(`[seed] cleanup: marked ${rowCount} stuck VPS orders as partial`);
+    }
+  } catch (e) {
+    console.error('[seed] cleanup failed:', e.message);
+  }
+
+  // ── Advance order_number sequence past VPS range ────────────────────────
+  // Ensures next real production order gets a number >= 3800 (above VPS #2695)
+  try {
+    const { rows } = await query(`SELECT MAX(order_number) AS mx FROM public.engagement_orders`);
+    const maxOn = Number(rows[0]?.mx ?? 0);
+    if (maxOn < 3800) {
+      await query(`SELECT setval('engagement_orders_order_number_seq', 3800, false)`);
+      console.log(`[seed] sequence: advanced order_number seq to 3800 (was at ${maxOn})`);
+    }
+  } catch (e) {
+    console.error('[seed] sequence advance failed:', e.message);
+  }
+
   console.log('[seed] VPS data seed complete.');
 }
