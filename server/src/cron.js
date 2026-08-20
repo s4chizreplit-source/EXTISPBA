@@ -7,44 +7,71 @@
 import { query, withTx } from './db.js';
 import { placeProviderOrder } from './provider.js';
 
-const BATCH_SIZE = 10; // runs per tick
-const TICK_MS = 30_000; // 30 seconds
+const BATCH_SIZE = 25; // runs per tick
+const TICK_MS = 15_000; // 15 seconds
 
 async function processBatch() {
-  // Pick up to BATCH_SIZE due runs, skipping orders that are paused/cancelled
-  // Use FOR UPDATE SKIP LOCKED so concurrent ticks don't double-process
-  const { rows: runs } = await query(`
-    SELECT
-      ors.id,
-      ors.quantity_to_send,
-      ors.engagement_order_item_id,
-      ors.retry_count,
-      eo.link,
-      eo.id        AS order_id,
-      eo.status    AS order_status,
-      eoi.status   AS item_status,
-      COALESCE(spm.provider_service_id, s.provider_service_id)  AS provider_service_id,
-      pa.id        AS account_id,
-      pa.api_url,
-      pa.api_key,
-      pa.delivery_multiplier
-    FROM organic_run_schedule ors
-    JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
-    JOIN engagement_orders eo       ON eo.id  = eoi.engagement_order_id
-    LEFT JOIN services s            ON s.id   = eoi.service_id
-    LEFT JOIN service_provider_mapping spm
-      ON spm.service_id = s.id AND spm.is_active = true
-    LEFT JOIN provider_accounts pa
-      ON pa.id = COALESCE(spm.provider_account_id, ors.provider_account_id)
-      AND pa.is_active = true
-    WHERE ors.status = 'pending'
-      AND ors.scheduled_at <= now()
-      AND eo.status  NOT IN ('cancelled','paused','completed')
-      AND eoi.status NOT IN ('cancelled','paused','completed','failed')
-    ORDER BY ors.scheduled_at ASC
-    LIMIT $1
-    FOR UPDATE OF ors SKIP LOCKED
-  `, [BATCH_SIZE]);
+  // SELECT + immediately mark 'started' inside ONE transaction.
+  // This holds the row lock until the UPDATE commits, so no second tick
+  // can ever pick up the same row, eliminating duplicate dispatches.
+  const runs = await withTx(async (client) => {
+    // Step 1: lock exactly BATCH_SIZE distinct ors rows (no fan-out joins here).
+    const { rows: locked } = await client.query(`
+      SELECT ors.id
+      FROM organic_run_schedule ors
+      JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
+      JOIN engagement_orders eo       ON eo.id  = eoi.engagement_order_id
+      WHERE ors.status = 'pending'
+        AND ors.retry_count < 3
+        AND ors.scheduled_at <= now()
+        AND eo.status  NOT IN ('cancelled','paused','completed')
+        AND eoi.status NOT IN ('cancelled','paused','completed','failed')
+      ORDER BY ors.scheduled_at ASC
+      LIMIT $1
+      FOR UPDATE OF ors SKIP LOCKED
+    `, [BATCH_SIZE]);
+
+    if (locked.length === 0) return [];
+    const ids = locked.map(r => r.id);
+
+    // Step 2: mark all as 'started' before releasing the lock — no second tick
+    // can pick these up now (status != 'pending').
+    await client.query(
+      `UPDATE organic_run_schedule SET status='started', started_at=now() WHERE id = ANY($1)`,
+      [ids]
+    );
+
+    // Step 3: fetch full details (joins are safe now — no FOR UPDATE needed).
+    const { rows } = await client.query(`
+      SELECT DISTINCT ON (ors.id)
+        ors.id,
+        ors.quantity_to_send,
+        ors.engagement_order_item_id,
+        ors.retry_count,
+        eo.link,
+        eo.id        AS order_id,
+        eo.status    AS order_status,
+        eoi.status   AS item_status,
+        COALESCE(spm.provider_service_id, s.provider_service_id)  AS provider_service_id,
+        pa.id        AS account_id,
+        pa.api_url,
+        pa.api_key,
+        pa.delivery_multiplier
+      FROM organic_run_schedule ors
+      JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
+      JOIN engagement_orders eo       ON eo.id  = eoi.engagement_order_id
+      LEFT JOIN services s            ON s.id   = eoi.service_id
+      LEFT JOIN service_provider_mapping spm
+        ON spm.service_id = s.id AND spm.is_active = true
+      LEFT JOIN provider_accounts pa
+        ON pa.id = COALESCE(spm.provider_account_id, ors.provider_account_id)
+        AND pa.is_active = true
+      WHERE ors.id = ANY($1)
+      ORDER BY ors.id, pa.last_used_at ASC NULLS FIRST
+    `, [ids]);
+
+    return rows;
+  });
 
   if (runs.length === 0) return;
 
@@ -54,12 +81,7 @@ async function processBatch() {
 }
 
 async function dispatchRun(run) {
-  // Mark as started so we don't double-process
-  await query(
-    `UPDATE organic_run_schedule SET status='started', started_at=now() WHERE id=$1 AND status='pending'`,
-    [run.id]
-  );
-
+  // Row is already marked 'started' by processBatch transaction — no second UPDATE needed here.
   try {
     // Apply delivery_multiplier: if provider over-delivers 2x, we send half the qty
     const multiplier = Number(run.delivery_multiplier ?? 1);
@@ -147,7 +169,7 @@ async function dispatchRun(run) {
 }
 
 export function startCron() {
-  console.log('[cron] Organic run dispatcher started (tick every 30s)');
+  console.log(`[cron] Organic run dispatcher started (batch=${BATCH_SIZE}, tick=${TICK_MS/1000}s)`);
   // First tick shortly after startup
   setTimeout(() => {
     processBatch().catch(e => console.error('[cron] Batch error:', e));

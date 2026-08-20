@@ -17,6 +17,8 @@ import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import engagementOrderRoutes from './routes/engagement-orders.js';
 import zapupiRoutes from './routes/zapupi.js';
+import bundleRoutes from './routes/bundles.js';
+import userAdminRoutes from './routes/users.js';
 import { startCron } from './cron.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -68,6 +70,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/orders', orderRoutes);
+// Specific sub-paths first, then the broad /api/admin catch-all
+app.use('/api/admin/bundles', bundleRoutes);
+app.use('/api/admin/users', userAdminRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/engagement-orders', engagementOrderRoutes);
 app.use('/api/zapupi', zapupiRoutes);

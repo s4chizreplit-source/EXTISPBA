@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: 'include', ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -103,37 +109,14 @@ export default function AdminBundles() {
   // Fetch bundles
   const { data: bundles, isLoading } = useQuery({
     queryKey: ['admin-bundles'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('engagement_bundles')
-        .select(
-          `
-          *,
-          items:bundle_items(
-            *,
-            service:services(id, name, price, min_quantity, provider_id, provider_service_id)
-          )
-        `
-        )
-        .order('sort_order');
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () => apiFetch('/api/admin/bundles'),
     enabled: !!user && isAdmin,
   });
 
   // Fetch services for linking
   const { data: services } = useQuery({
     queryKey: ['admin-services-active'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('services')
-        .select('*')
-        .eq('is_active', true)
-        .order('category');
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () => apiFetch('/api/admin/bundles/services'),
     enabled: !!user && isAdmin,
   });
 
@@ -141,17 +124,8 @@ export default function AdminBundles() {
   const { data: mappedServiceIds } = useQuery({
     queryKey: ['mapped-service-ids'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('service_provider_mapping')
-        .select('service_id')
-        .not('service_id', 'is', null);
-      if (error) throw error;
-
-      // Return unique, non-null service IDs that have mappings
-      const ids = (data || [])
-        .map((m: any) => m.service_id)
-        .filter(Boolean);
-      return [...new Set(ids)];
+      const data = await apiFetch('/api/admin/bundles/service-provider-mappings');
+      return [...new Set((data || []).map((m: any) => m.service_id).filter(Boolean))];
     },
     enabled: !!user && isAdmin,
   });
@@ -160,7 +134,7 @@ export default function AdminBundles() {
   const allServices = (() => {
     if (!services) return [];
     const seen = new Set<string>();
-    return services.filter(s => {
+    return services.filter((s: any) => {
       if (seen.has(s.provider_service_id)) return false;
       seen.add(s.provider_service_id);
       return true;
@@ -168,43 +142,26 @@ export default function AdminBundles() {
   })();
 
   // Fetch provider accounts for rotation - always get fresh data
-  const { data: providerAccounts, refetch: refetchAccounts } = useQuery({
+  const { data: providerAccounts } = useQuery({
     queryKey: ['provider-accounts-for-bundles'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('provider_accounts')
-        .select('*')
-        .eq('is_active', true)
-        .order('name');
-      if (error) throw error;
+      const data = await apiFetch('/api/admin/provider-accounts');
       console.log('[AdminBundles] Fetched provider accounts:', data?.length);
       return data;
     },
     enabled: !!user && isAdmin,
-    staleTime: 0, // Always refetch to get latest accounts
+    staleTime: 0,
     refetchOnMount: 'always',
   });
 
   // Create bundle mutation
   const createBundleMutation = useMutation({
-    mutationFn: async (bundleData: {
-      name: string;
-      platform: string;
-      description?: string;
-    }) => {
-      const { data, error } = await supabase
-        .from('engagement_bundles')
-        .insert({
-          name: bundleData.name,
-          platform: bundleData.platform,
-          description: bundleData.description,
-          is_active: true,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
-    },
+    mutationFn: (bundleData: { name: string; platform: string; description?: string }) =>
+      apiFetch('/api/admin/bundles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bundleData),
+      }),
     onSuccess: () => {
       toast({ title: 'Bundle created!' });
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
@@ -221,19 +178,12 @@ export default function AdminBundles() {
 
   // Toggle bundle active
   const toggleBundleMutation = useMutation({
-    mutationFn: async ({
-      id,
-      is_active,
-    }: {
-      id: string;
-      is_active: boolean;
-    }) => {
-      const { error } = await supabase
-        .from('engagement_bundles')
-        .update({ is_active })
-        .eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
+      apiFetch(`/api/admin/bundles/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
     },
@@ -241,13 +191,7 @@ export default function AdminBundles() {
 
   // Delete bundle
   const deleteBundleMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('engagement_bundles')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: (id: string) => apiFetch(`/api/admin/bundles/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       toast({ title: 'Bundle deleted' });
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
@@ -257,16 +201,12 @@ export default function AdminBundles() {
 
   // Add item to bundle
   const addItemMutation = useMutation({
-    mutationFn: async (itemData: {
-      bundle_id: string;
-      engagement_type: string;
-      service_id?: string;
-      ratio_percent: number;
-      is_base: boolean;
-    }) => {
-      const { error } = await supabase.from('bundle_items').insert(itemData);
-      if (error) throw error;
-    },
+    mutationFn: ({ bundle_id, ...rest }: { bundle_id: string; engagement_type: string; service_id?: string; ratio_percent: number; is_base: boolean }) =>
+      apiFetch(`/api/admin/bundles/${bundle_id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rest),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
     },
@@ -274,10 +214,7 @@ export default function AdminBundles() {
 
   // Delete item
   const deleteItemMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('bundle_items').delete().eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: (id: string) => apiFetch(`/api/admin/bundles/items/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
     },
@@ -285,20 +222,12 @@ export default function AdminBundles() {
 
   // Update item service
   const updateItemMutation = useMutation({
-    mutationFn: async ({
-      id,
-      service_id,
-    }: {
-      id: string;
-      service_id: string | null;
-    }) => {
-      console.log('[AdminBundles] Linking service:', { id, service_id });
-      const { error } = await supabase
-        .from('bundle_items')
-        .update({ service_id })
-        .eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id, service_id }: { id: string; service_id: string | null }) =>
+      apiFetch(`/api/admin/bundles/items/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_id }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
       queryClient.invalidateQueries({ queryKey: ['all-bundles-with-items'] });
@@ -312,33 +241,25 @@ export default function AdminBundles() {
 
   // Update item ratio
   const updateItemRatioMutation = useMutation({
-    mutationFn: async ({
-      id,
-      ratio_percent,
-    }: {
-      id: string;
-      ratio_percent: number;
-    }) => {
-      const { error } = await supabase
-        .from('bundle_items')
-        .update({ ratio_percent })
-        .eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id, ratio_percent }: { id: string; ratio_percent: number }) =>
+      apiFetch(`/api/admin/bundles/items/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ratio_percent }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
     },
   });
 
-  // Update bundle item per-1000 price (admin's final price for this engagement type)
+  // Update bundle item per-1000 price
   const updatePricePerKMutation = useMutation({
-    mutationFn: async ({ id, price_per_k }: { id: string; price_per_k: number | null }) => {
-      const { error } = await supabase
-        .from('bundle_items')
-        .update({ price_per_k })
-        .eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id, price_per_k }: { id: string; price_per_k: number | null }) =>
+      apiFetch(`/api/admin/bundles/items/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ price_per_k }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
       toast({ title: 'Price updated' });
@@ -348,19 +269,12 @@ export default function AdminBundles() {
 
   // Toggle custom ratios mode
   const toggleCustomRatiosMutation = useMutation({
-    mutationFn: async ({
-      id,
-      use_custom_ratios,
-    }: {
-      id: string;
-      use_custom_ratios: boolean;
-    }) => {
-      const { error } = await supabase
-        .from('engagement_bundles')
-        .update({ use_custom_ratios })
-        .eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id, use_custom_ratios }: { id: string; use_custom_ratios: boolean }) =>
+      apiFetch(`/api/admin/bundles/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_custom_ratios }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
     },
@@ -368,19 +282,12 @@ export default function AdminBundles() {
 
   // Toggle AI Organic Mode
   const toggleAiOrganicMutation = useMutation({
-    mutationFn: async ({
-      id,
-      ai_organic_enabled,
-    }: {
-      id: string;
-      ai_organic_enabled: boolean;
-    }) => {
-      const { error } = await supabase
-        .from('engagement_bundles')
-        .update({ ai_organic_enabled })
-        .eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id, ai_organic_enabled }: { id: string; ai_organic_enabled: boolean }) =>
+      apiFetch(`/api/admin/bundles/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ai_organic_enabled }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-bundles'] });
       toast({
@@ -433,21 +340,16 @@ export default function AdminBundles() {
       let failCount = 0;
 
       for (const [providerId, serviceIds] of providers) {
-        const { data: result, error } = await supabase.functions.invoke('import-services', {
-          body: {
-            provider_id: providerId,
-            action: 'import',
-            service_ids: Array.from(serviceIds),
-            markup_percent: 0,
-          },
-        });
-
-        if (error || result?.error) {
-          console.error(`Sync failed for provider ${providerId}:`, error || result?.error);
-          failCount += serviceIds.size;
-        } else {
+        try {
+          await apiFetch('/api/admin/bundles/import-services', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider_id: providerId, action: 'import', service_ids: Array.from(serviceIds), markup_percent: 0 }),
+          });
           successCount += serviceIds.size;
-          console.log(`Synced ${serviceIds.size} services from provider ${providerId}`);
+        } catch (e: any) {
+          console.error(`Sync failed for provider ${providerId}:`, e);
+          failCount += serviceIds.size;
         }
       }
 
@@ -1125,15 +1027,10 @@ function ProviderMappingDialog({
     queryKey: ['service-mappings-bundle', serviceId],
     queryFn: async () => {
       if (!serviceId) return [];
-      const { data, error } = await supabase
-        .from('service_provider_mapping')
-        .select('*')
-        .eq('service_id', serviceId);
-      if (error) throw error;
-      return data;
+      return apiFetch(`/api/admin/bundles/service-provider-mappings?service_id=${serviceId}`);
     },
     enabled: isOpen && !!serviceId,
-    staleTime: 0, // Always refetch when dialog opens
+    staleTime: 0,
     refetchOnMount: 'always',
   });
 
@@ -1182,181 +1079,75 @@ function ProviderMappingDialog({
           toast({ title: 'Please enter a Service ID and check at least one account', variant: 'destructive' });
           return;
         }
-
         const [accountId, data] = firstChecked;
-        const acct = providerAccounts.find(a => a.id === accountId);
-        if (!acct) {
-          toast({ title: 'Provider account not found', variant: 'destructive' });
-          return;
-        }
+        const acct = providerAccounts.find((a: any) => a.id === accountId);
+        if (!acct) { toast({ title: 'Provider account not found', variant: 'destructive' }); return; }
 
-        console.log('[ProviderMapping] Auto-importing service:', {
-          provider_id: acct.provider_id,
-          service_id: data.serviceId.trim(),
-          account_name: acct.name,
-        });
-
-        // Build category name for auto-import
         const categoryOverride = platform && engagementType
           ? `${platform.charAt(0).toUpperCase() + platform.slice(1)} ${engagementType.charAt(0).toUpperCase() + engagementType.slice(1)}`
           : undefined;
 
-        // Auto-import the service
-        const { data: importResult, error: importError } = await supabase.functions.invoke('import-services', {
-          body: {
-            provider_id: acct.provider_id,
-            action: 'import',
-            service_ids: [data.serviceId.trim()],
-            category_override: categoryOverride,
-            markup_percent: 0,
-          },
-        });
-
-        console.log('[ProviderMapping] Import result:', importResult, 'Error:', importError);
-
-        // Check BOTH SDK error AND edge function response error
-        if (importError) {
-          console.error('Auto-import SDK error:', importError);
-          toast({ title: 'Service import failed', description: importError.message, variant: 'destructive' });
-          return;
-        }
-
-        if (importResult?.error) {
-          console.error('Auto-import edge function error:', importResult.error);
-          toast({ title: 'Service import failed', description: importResult.error, variant: 'destructive' });
-          return;
-        }
-
-        if (!importResult?.success) {
-          console.error('Auto-import unexpected response:', importResult);
-          toast({ title: 'Service import failed', description: 'Unexpected response from import function', variant: 'destructive' });
-          return;
-        }
-
-        console.log('[ProviderMapping] Import success, looking up service in DB...');
-
-        // Find the newly imported service
-        const { data: importedService, error: lookupError } = await supabase
-          .from('services')
-          .select('id')
-          .eq('provider_id', acct.provider_id)
-          .eq('provider_service_id', data.serviceId.trim())
-          .single();
-
-        console.log('[ProviderMapping] DB lookup result:', importedService, 'Error:', lookupError);
-
-        if (!importedService) {
-          toast({
-            title: 'Service not found in database',
-            description: `Imported OK but couldn't find service ${data.serviceId.trim()} for provider ${acct.provider_id}. Check provider_id matches.`,
-            variant: 'destructive'
+        let importResult: any;
+        try {
+          importResult = await apiFetch('/api/admin/bundles/import-services', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider_id: acct.provider_id, action: 'import', service_ids: [data.serviceId.trim()], category_override: categoryOverride, markup_percent: 0 }),
           });
+        } catch (e: any) {
+          toast({ title: 'Service import failed', description: e.message, variant: 'destructive' });
+          return;
+        }
+        if (!importResult?.success) {
+          toast({ title: 'Service import failed', description: 'Unexpected response', variant: 'destructive' });
           return;
         }
 
-        currentServiceId = importedService.id;
-
-        // Auto-link to bundle item
-        if (onServiceLinked) {
-          onServiceLinked(bundleItemId, currentServiceId);
+        // Find the newly imported service from the services list
+        const allSvcs = await apiFetch('/api/admin/bundles/services');
+        const imported = allSvcs.find((s: any) => s.provider_id === acct.provider_id && s.provider_service_id === data.serviceId.trim());
+        if (!imported) {
+          toast({ title: 'Service not found in database', description: `Imported OK but couldn't find service ${data.serviceId.trim()}`, variant: 'destructive' });
+          return;
         }
+        currentServiceId = imported.id;
+        if (onServiceLinked) onServiceLinked(bundleItemId, currentServiceId);
         setServiceId(currentServiceId);
         toast({ title: `Service #${data.serviceId.trim()} imported & linked!` });
       }
 
-      // Get current mappings
-      const { data: currentMappings } = await supabase
-        .from('service_provider_mapping')
-        .select('id, provider_account_id')
-        .eq('service_id', currentServiceId);
+      // Save provider mappings via API (handles diff/upsert/delete server-side)
+      const mappingsList = Object.entries(mappings).map(([provider_account_id, m]) => ({
+        provider_account_id,
+        provider_service_id: m.serviceId,
+        sort_order: m.sortOrder,
+        checked: m.checked,
+      }));
+      await apiFetch('/api/admin/bundles/service-provider-mappings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_id: currentServiceId, mappings: mappingsList }),
+      });
 
-      const currentAccountIds = new Set(currentMappings?.map(m => m.provider_account_id) || []);
-      const newAccountIds = new Set(
-        Object.entries(mappings)
-          .filter(([_, val]) => val.checked)
-          .map(([id]) => id)
-      );
-
-      // Batch delete removed mappings
-      const toDelete = (currentMappings || []).filter(m => !newAccountIds.has(m.provider_account_id));
-      if (toDelete.length > 0) {
-        await supabase
-          .from('service_provider_mapping')
-          .delete()
-          .in('id', toDelete.map(m => m.id));
-      }
-
-      // Batch upsert mappings - split into updates and inserts
-      const toUpdate: { id: string; provider_service_id: string; sort_order: number }[] = [];
-      const toInsert: { service_id: string; provider_account_id: string; provider_service_id: string; sort_order: number; is_active: boolean }[] = [];
-
-      for (const [accountId, data] of Object.entries(mappings)) {
-        if (!data.checked) continue;
-        if (currentAccountIds.has(accountId)) {
-          const existing = currentMappings?.find(m => m.provider_account_id === accountId);
-          if (existing) {
-            toUpdate.push({ id: existing.id, provider_service_id: data.serviceId, sort_order: data.sortOrder });
-          }
-        } else {
-          toInsert.push({
-            service_id: currentServiceId,
-            provider_account_id: accountId,
-            provider_service_id: data.serviceId,
-            sort_order: data.sortOrder,
-            is_active: true,
-          });
-        }
-      }
-
-      // Run updates and inserts in parallel
-      if (toInsert.length > 0) {
-        await supabase.from('service_provider_mapping').insert(toInsert);
-      }
-      await Promise.all(
-        toUpdate.map(u =>
-          supabase.from('service_provider_mapping')
-            .update({ provider_service_id: u.provider_service_id, sort_order: u.sort_order, is_active: true })
-            .eq('id', u.id)
-        )
-      );
-
-      // Refresh service prices from provider API for all checked accounts
-      // This ensures we always have the real provider rate (not stale/placeholder prices)
-      const checkedEntries = Object.entries(mappings).filter(([_, v]) => v.checked && v.serviceId.trim());
-      const reimportByProvider: Record<string, { providerId: string; serviceIds: Set<string> }> = {};
-
-      for (const [accountId, data] of checkedEntries) {
-        const acct = providerAccounts.find(a => a.id === accountId);
-        if (!acct) continue;
-        if (!reimportByProvider[acct.provider_id]) {
-          reimportByProvider[acct.provider_id] = { providerId: acct.provider_id, serviceIds: new Set() };
-        }
-        reimportByProvider[acct.provider_id].serviceIds.add(data.serviceId.trim());
-      }
-
-      // Build category override for proper categorization
+      // Refresh prices from provider for checked accounts
       const categoryOverride = platform && engagementType
         ? `${platform.charAt(0).toUpperCase() + platform.slice(1)} ${engagementType.charAt(0).toUpperCase() + engagementType.slice(1)}`
         : undefined;
-
-      // Reimport services from each provider (updates existing services with real prices)
-      await Promise.all(
-        Object.values(reimportByProvider).map(({ providerId, serviceIds }) =>
-          supabase.functions.invoke('import-services', {
-            body: {
-              provider_id: providerId,
-              action: 'import',
-              service_ids: Array.from(serviceIds),
-              category_override: categoryOverride,
-              markup_percent: 0,
-            },
-          }).then(res => {
-            console.log(`[ProviderMapping] Price refresh for provider ${providerId}:`, res.data);
-          }).catch(err => {
-            console.warn(`[ProviderMapping] Price refresh failed for ${providerId}:`, err);
-          })
-        )
-      );
+      const reimportByProvider: Record<string, Set<string>> = {};
+      for (const [accountId, m] of Object.entries(mappings)) {
+        if (!m.checked || !m.serviceId.trim()) continue;
+        const acct = providerAccounts.find((a: any) => a.id === accountId);
+        if (!acct) continue;
+        if (!reimportByProvider[acct.provider_id]) reimportByProvider[acct.provider_id] = new Set();
+        reimportByProvider[acct.provider_id].add(m.serviceId.trim());
+      }
+      await Promise.all(Object.entries(reimportByProvider).map(([pid, sids]) =>
+        apiFetch('/api/admin/bundles/import-services', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider_id: pid, action: 'import', service_ids: Array.from(sids), category_override: categoryOverride, markup_percent: 0 }),
+        }).catch(e => console.warn(`[ProviderMapping] Price refresh failed for ${pid}:`, e))
+      ));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['service-mappings-bundle'] });
@@ -1524,15 +1315,7 @@ function ServiceProviderPreview({
   // Fetch mappings for this service
   const { data: mappings } = useQuery({
     queryKey: ['service-provider-preview', serviceId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('service_provider_mapping')
-        .select('*')
-        .eq('service_id', serviceId)
-        .order('sort_order');
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () => apiFetch(`/api/admin/bundles/service-provider-mappings?service_id=${serviceId}`),
   });
 
   const mappedProviders = mappings?.map(m => {

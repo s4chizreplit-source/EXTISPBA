@@ -2,8 +2,14 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: 'include', ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -82,40 +88,21 @@ export default function AdminUsers() {
   const { data: users, isLoading } = useQuery({
     queryKey: ['admin-all-users-with-subs'],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_admin_users_summary' as any);
-      if (error) throw error;
-
-      // A partially imported backend can still return more than one row per
-      // auth user. Collapse by user id (email as fallback) and keep the row
-      // that carries the most data so admin/wallet info never splits.
-      const byUser = new Map<string, any>();
-      for (const u of ((data as any) || [])) {
-        const key = String(u.user_id || u.id || u.email || '').toLowerCase();
-        if (!key) continue;
-        const prev = byUser.get(key);
-        const weight = (r: any) =>
-          (Number(r?.balance) || 0) + (Number(r?.total_deposited) || 0) + (Number(r?.total_spent) || 0) +
-          (r?.subscription_plan && r.subscription_plan !== 'none' ? 1 : 0) +
-          (r?.is_admin || r?.role === 'admin' ? 1 : 0);
-        if (!prev || weight(u) > weight(prev)) byUser.set(key, prev ? { ...prev, ...u } : u);
-        else byUser.set(key, { ...u, ...prev });
-      }
-
-      return Array.from(byUser.values()).map((u: any) => ({
+      const rows = await apiFetch('/api/admin/users');
+      return (rows as any[]).map((u: any) => ({
         ...u,
         wallet: {
           balance: u.balance,
           total_deposited: u.total_deposited,
-          total_spent: u.total_spent
+          total_spent: u.total_spent,
         },
         orderCounts: {
-          singleActive: u.active_single_orders,
-          singlePaused: u.paused_single_orders,
-          engagementActive: u.active_engagement_orders,
-          engagementPaused: u.paused_engagement_orders,
-        }
+          singleActive: Number(u.active_single_orders),
+          singlePaused: Number(u.paused_single_orders),
+          engagementActive: Number(u.active_engagement_orders),
+          engagementPaused: Number(u.paused_engagement_orders),
+        },
       })) as UserProfile[];
-
     },
   });
 
@@ -131,48 +118,13 @@ export default function AdminUsers() {
     mutationFn: async () => {
       if (!selectedUser || !balanceAmount) return;
       const targetUserId = resolveUserId(selectedUser);
-
-      const INR_RATE = 83.5; // Same rate used by Razorpay credit flow
       const inrAmount = parseFloat(balanceAmount);
       if (!inrAmount || inrAmount <= 0) throw new Error('Enter a valid INR amount');
-      // Convert INR → USD because wallets are stored in USD internally
-      const amount = Math.trunc((inrAmount / INR_RATE) * 10000) / 10000;
-
-      // Read live balance instead of trusting the cached list row.
-      const { data: liveWallet } = await supabase
-        .from('wallets')
-        .select('balance, total_deposited')
-        .eq('user_id', targetUserId)
-        .maybeSingle();
-
-      const currentBalance = Number(liveWallet?.balance ?? selectedUser.wallet?.balance ?? 0);
-      const currentDeposited = Number(liveWallet?.total_deposited ?? selectedUser.wallet?.total_deposited ?? 0);
-      const newBalance =
-        Math.trunc((balanceAction === 'add' ? currentBalance + amount : currentBalance - amount) * 10000) / 10000;
-
-      if (newBalance < 0) throw new Error('Balance cannot be negative');
-
-      // Upsert so a missing wallet row is created instead of silently doing nothing.
-      const { error: walletError } = await supabase
-        .from('wallets')
-        .upsert({
-          user_id: targetUserId,
-          balance: newBalance,
-          total_deposited: balanceAction === 'add' ? currentDeposited + amount : currentDeposited,
-        }, { onConflict: 'user_id' });
-
-      if (walletError) throw walletError;
-
-      const { error: txError } = await supabase.from('transactions').insert({
-        user_id: targetUserId,
-        type: balanceAction === 'add' ? 'deposit' : 'withdrawal',
-        amount: balanceAction === 'add' ? amount : -amount,
-        balance_after: newBalance,
-        description: `Admin ${balanceAction === 'add' ? 'deposit' : 'withdrawal'} — ₹${inrAmount.toFixed(2)}`,
-        status: 'completed',
+      await apiFetch(`/api/admin/users/${targetUserId}/balance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: balanceAction, inr_amount: inrAmount }),
       });
-
-      if (txError) throw txError;
     },
     onSuccess: () => {
       toast.success('Balance updated successfully!');
@@ -189,11 +141,11 @@ export default function AdminUsers() {
   const toggleAdminMutation = useMutation({
     mutationFn: async (targetUser: UserProfile) => {
       const newRole = targetUser.role === 'admin' ? 'user' : 'admin';
-      const { error } = await supabase
-        .from('user_roles')
-        .update({ role: newRole })
-        .eq('user_id', targetUser.user_id);
-      if (error) throw error;
+      await apiFetch(`/api/admin/users/${targetUser.user_id}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
     },
     onSuccess: () => {
       toast.success('User role updated!');
@@ -206,25 +158,8 @@ export default function AdminUsers() {
 
   // Pause all orders mutation
   const pauseAllOrdersMutation = useMutation({
-    mutationFn: async (targetUser: UserProfile) => {
-      // 1. Update single orders to paused
-      const { error: singleError } = await supabase
-        .from('orders')
-        .update({ status: 'paused' })
-        .eq('user_id', targetUser.user_id)
-        .in('status', ['pending', 'processing']);
-
-      if (singleError) throw singleError;
-
-      // 2. Update engagement orders to paused
-      const { error: engagementError } = await supabase
-        .from('engagement_orders')
-        .update({ status: 'paused' })
-        .eq('user_id', targetUser.user_id)
-        .in('status', ['pending', 'processing']);
-
-      if (engagementError) throw engagementError;
-    },
+    mutationFn: (targetUser: UserProfile) =>
+      apiFetch(`/api/admin/users/${targetUser.user_id}/pause-orders`, { method: 'POST' }),
     onSuccess: () => {
       toast.success('All orders paused!');
       setPauseUser(null);
@@ -237,81 +172,8 @@ export default function AdminUsers() {
 
   // Resume all orders mutation
   const resumeAllOrdersMutation = useMutation({
-    mutationFn: async (targetUser: UserProfile) => {
-      const now = new Date().toISOString();
-
-      // 1. Get all paused engagement orders for this user
-      const { data: pausedEngOrders } = await supabase
-        .from('engagement_orders')
-        .select('id')
-        .eq('user_id', targetUser.user_id)
-        .eq('status', 'paused');
-
-      // 2. Get all paused single orders for this user
-      const { data: pausedSingleOrders } = await supabase
-        .from('orders')
-        .select('id')
-        .eq('user_id', targetUser.user_id)
-        .eq('status', 'paused');
-
-      // 3. Cancel overdue pending runs for engagement orders (scheduled during pause)
-      if (pausedEngOrders && pausedEngOrders.length > 0) {
-        // Get engagement order item IDs
-        const { data: items } = await supabase
-          .from('engagement_order_items')
-          .select('id')
-          .in('engagement_order_id', pausedEngOrders.map(o => o.id));
-
-        if (items && items.length > 0) {
-          const { error: cancelError } = await supabase
-            .from('organic_run_schedule')
-            .update({
-              status: 'cancelled',
-              error_message: 'Skipped — order was paused during this scheduled time',
-              completed_at: now,
-            })
-            .in('engagement_order_item_id', items.map(i => i.id))
-            .eq('status', 'pending')
-            .lt('scheduled_at', now);
-
-          if (cancelError) console.error('Cancel overdue engagement runs error:', cancelError);
-        }
-      }
-
-      // 4. Cancel overdue pending runs for single orders (scheduled during pause)
-      if (pausedSingleOrders && pausedSingleOrders.length > 0) {
-        const { error: cancelSingleError } = await supabase
-          .from('organic_run_schedule')
-          .update({
-            status: 'cancelled',
-            error_message: 'Skipped — order was paused during this scheduled time',
-            completed_at: now,
-          })
-          .in('order_id', pausedSingleOrders.map(o => o.id))
-          .eq('status', 'pending')
-          .lt('scheduled_at', now);
-
-        if (cancelSingleError) console.error('Cancel overdue single runs error:', cancelSingleError);
-      }
-
-      // 5. Resume single orders
-      const { error: singleError } = await supabase
-        .from('orders')
-        .update({ status: 'processing' })
-        .eq('user_id', targetUser.user_id)
-        .eq('status', 'paused');
-
-      if (singleError) throw singleError;
-
-      // 6. Resume engagement orders
-      const { error: engagementError } = await supabase
-        .from('engagement_orders')
-        .update({ status: 'processing' })
-        .eq('user_id', targetUser.user_id)
-        .eq('status', 'paused');
-
-      if (engagementError) throw engagementError;
-    },
+    mutationFn: (targetUser: UserProfile) =>
+      apiFetch(`/api/admin/users/${targetUser.user_id}/resume-orders`, { method: 'POST' }),
     onSuccess: () => {
       toast.success('All orders resumed! Overdue runs during pause were cancelled.');
       queryClient.invalidateQueries({ queryKey: ['admin-all-users-with-subs'] });
@@ -323,104 +185,12 @@ export default function AdminUsers() {
 
   // Cancel all orders mutation
   const cancelAllOrdersMutation = useMutation({
-    mutationFn: async ({ targetUser, refund }: { targetUser: UserProfile; refund: boolean }) => {
-      // 1. Get all single orders for this user
-      const { data: singleOrders } = await supabase
-        .from('orders')
-        .select('id, price')
-        .eq('user_id', targetUser.user_id)
-        .not('status', 'in', '("completed","cancelled","failed")');
-
-      // 2. Get all engagement orders for this user
-      const { data: engagementOrders } = await supabase
-        .from('engagement_orders')
-        .select('id, total_price')
-        .eq('user_id', targetUser.user_id)
-        .not('status', 'in', '("completed","cancelled","failed")');
-
-      // 3. Cancel all pending runs for single orders
-      for (const order of singleOrders || []) {
-        await supabase
-          .from('organic_run_schedule')
-          .update({ status: 'cancelled' })
-          .eq('order_id', order.id)
-          .eq('status', 'pending');
-      }
-
-      // 4. Get engagement order items and cancel their runs
-      for (const eo of engagementOrders || []) {
-        const { data: items } = await supabase
-          .from('engagement_order_items')
-          .select('id')
-          .eq('engagement_order_id', eo.id);
-
-        for (const item of items || []) {
-          await supabase
-            .from('organic_run_schedule')
-            .update({ status: 'cancelled' })
-            .eq('engagement_order_item_id', item.id)
-            .eq('status', 'pending');
-        }
-
-        // Cancel the items too
-        await supabase
-          .from('engagement_order_items')
-          .update({ status: 'cancelled' })
-          .eq('engagement_order_id', eo.id)
-          .not('status', 'in', '("completed","cancelled","failed")');
-      }
-
-      // 5. Update single order statuses
-      const { error: singleError } = await supabase
-        .from('orders')
-        .update({ status: 'cancelled' })
-        .eq('user_id', targetUser.user_id)
-        .not('status', 'in', '("completed","cancelled","failed")');
-
-      if (singleError) throw singleError;
-
-      // 6. Update engagement order statuses
-      const { error: engagementError } = await supabase
-        .from('engagement_orders')
-        .update({ status: 'cancelled' })
-        .eq('user_id', targetUser.user_id)
-        .not('status', 'in', '("completed","cancelled","failed")');
-
-      if (engagementError) throw engagementError;
-
-      // 7. Optional refund - simple implementation (just log for now, complex calculation needed for precise refund)
-      if (refund) {
-        // Calculate rough refund based on order prices
-        const singleTotal = (singleOrders || []).reduce((sum, o) => sum + (o.price || 0), 0);
-        const engagementTotal = (engagementOrders || []).reduce((sum, o) => sum + (o.total_price || 0), 0);
-        const totalRefund = singleTotal + engagementTotal;
-
-        if (totalRefund > 0) {
-          // Get current wallet
-          const { data: wallet } = await supabase
-            .from('wallets')
-            .select('balance')
-            .eq('user_id', targetUser.user_id)
-            .single();
-
-          const newBalance = (wallet?.balance || 0) + totalRefund;
-
-          await supabase
-            .from('wallets')
-            .update({ balance: newBalance })
-            .eq('user_id', targetUser.user_id);
-
-          await supabase.from('transactions').insert({
-            user_id: targetUser.user_id,
-            type: 'refund',
-            amount: totalRefund,
-            balance_after: newBalance,
-            description: 'Admin cancelled all orders - refund',
-            status: 'completed',
-          });
-        }
-      }
-    },
+    mutationFn: ({ targetUser, refund }: { targetUser: UserProfile; refund: boolean }) =>
+      apiFetch(`/api/admin/users/${targetUser.user_id}/cancel-orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refund }),
+      }),
     onSuccess: () => {
       toast.success('All orders cancelled!');
       setCancelUser(null);
@@ -759,90 +529,15 @@ export default function AdminUsers() {
                         catch (e) { toast.error((e as Error).message); return; }
                         setSelfTestRunning(true);
                         setSelfTestSteps([]);
-                        const push = (s: { label: string; ok: boolean | null; detail?: string }) =>
-                          setSelfTestSteps((prev) => [...prev, s]);
-                        const RATE = 83.5;
-                        const delta = Math.trunc((1 / RATE) * 10000) / 10000;
-                        const insertedTxIds: string[] = [];
-                        let b0: number | null = null;
-                        let walletMutated = false;
-
-                        const cleanup = async (reason: string) => {
-                          try {
-                            if (walletMutated && b0 !== null) {
-                              await supabase.from('wallets')
-                                .update({ balance: b0 }).eq('user_id', tuid);
-                            }
-                            if (insertedTxIds.length) {
-                              await supabase.from('transactions').delete().in('id', insertedTxIds);
-                            }
-                            push({ label: `Rollback (${reason}) — balance restored & self-test rows removed`, ok: true });
-                          } catch (ce) {
-                            const cm = ce instanceof Error ? ce.message : String(ce);
-                            push({ label: `Rollback FAILED — manual review needed`, ok: false, detail: cm });
-                          }
-                        };
-
                         try {
-                          const { data: w0, error: e0 } = await supabase.from('wallets')
-                            .select('balance').eq('user_id', tuid).maybeSingle();
-                          if (e0) throw new Error('read: ' + e0.message);
-                          b0 = Number(w0?.balance || 0);
-                          push({ label: `1. Initial balance = $${b0.toFixed(4)}`, ok: true });
-
-                          const b1 = Math.trunc((b0 + delta) * 10000) / 10000;
-                          const { error: eu1 } = await supabase.from('wallets')
-                            .update({ balance: b1 }).eq('user_id', tuid);
-                          push({ label: '2. Update wallet (+₹1)', ok: !eu1, detail: eu1?.message });
-                          if (eu1) throw eu1;
-                          walletMutated = true;
-
-                          const { data: ti1, error: et1 } = await supabase.from('transactions').insert({
-                            user_id: tuid, type: 'deposit', amount: delta,
-                            balance_after: b1, status: 'completed',
-                            description: '[ADMIN SELF-TEST] +₹1 (auto-reverted)',
-                          }).select('id').single();
-                          push({ label: '3. Insert deposit transaction', ok: !et1, detail: et1?.message });
-                          if (et1) throw et1;
-                          if (ti1?.id) insertedTxIds.push(ti1.id);
-
-                          const { data: w1 } = await supabase.from('wallets').select('balance')
-                            .eq('user_id', tuid).maybeSingle();
-                          const okAdd = Math.abs(Number(w1?.balance || 0) - b1) < 0.0001;
-                          push({ label: `4. Verify balance = $${b1.toFixed(4)}`, ok: okAdd, detail: `got $${Number(w1?.balance).toFixed(4)}` });
-
-                          const b2 = Math.trunc((b1 - delta) * 10000) / 10000;
-                          const { error: eu2 } = await supabase.from('wallets')
-                            .update({ balance: b2 }).eq('user_id', tuid);
-                          push({ label: '5. Update wallet (-₹1)', ok: !eu2, detail: eu2?.message });
-                          if (eu2) throw eu2;
-
-                          const { data: ti2, error: et2 } = await supabase.from('transactions').insert({
-                            user_id: tuid, type: 'withdrawal', amount: -delta,
-                            balance_after: b2, status: 'completed',
-                            description: '[ADMIN SELF-TEST] -₹1 (auto-reverted)',
-                          }).select('id').single();
-                          push({ label: '6. Insert withdrawal transaction', ok: !et2, detail: et2?.message });
-                          if (et2) throw et2;
-                          if (ti2?.id) insertedTxIds.push(ti2.id);
-
-                          const { data: w2 } = await supabase.from('wallets').select('balance')
-                            .eq('user_id', tuid).maybeSingle();
-                          const okSub = Math.abs(Number(w2?.balance || 0) - b0) < 0.0001;
-                          push({ label: `7. Verify balance restored = $${b0.toFixed(4)}`, ok: okSub, detail: `got $${Number(w2?.balance).toFixed(4)}` });
-
-                          push({ label: `8. Recorded ${insertedTxIds.length} self-test transaction(s) — cleaning up`, ok: true });
-
-                          // Always remove the self-test transaction rows so the user never sees them.
-                          await cleanup('test complete');
-
-                          toast.success('Self-test finished ✔ (no permanent changes)');
+                          const { steps } = await apiFetch(`/api/admin/users/${tuid}/self-test`, { method: 'POST' });
+                          setSelfTestSteps(steps || []);
+                          const allOk = (steps || []).every((s: any) => s.ok !== false);
+                          if (allOk) toast.success('Self-test finished ✔ (no permanent changes)');
+                          else toast.error('Self-test had failures — check steps');
                           queryClient.invalidateQueries({ queryKey: ['admin-all-users-with-subs'] });
                         } catch (err) {
-                          const msg = err instanceof Error ? err.message : String(err);
-                          push({ label: 'ABORTED', ok: false, detail: msg });
-                          await cleanup('error');
-                          toast.error('Self-test failed: ' + msg);
+                          toast.error('Self-test failed: ' + (err as Error).message);
                         } finally {
                           setSelfTestRunning(false);
                         }

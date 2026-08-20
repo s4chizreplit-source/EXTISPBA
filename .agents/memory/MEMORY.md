@@ -1,3 +1,4 @@
 - [Auth migration](auth-migration.md) — Frontend auth replaced from Supabase to REST API; Express server must run alongside Vite dev server.
 - [VPS import](vps-import.md) — 811 auth users + all public tables imported from Supabase dump into Replit PostgreSQL; passwords are bcrypt in auth.users.encrypted_password.
 - [Run setup](run-setup.md) — Startup command, ports, and env wiring for this project.
+- [Cron design](cron-design.md) — Race condition + duplicate dispatch causes; 3-step TX fix; batch=25 tick=15s; retry_count<3 filter.
