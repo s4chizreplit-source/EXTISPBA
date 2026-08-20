@@ -1,5 +1,4 @@
 import { useState, useEffect, createContext, useContext, ReactNode, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import type { Profile, Wallet, AppRole } from '@/lib/supabase';
 
@@ -18,255 +17,111 @@ interface AuthContextType {
   refreshWallet: () => Promise<void>;
 }
 
+type AuthPayload = {
+  user: { id: string; email: string; fullName?: string; role?: string; createdAt?: string };
+  profile: Profile | null;
+  wallet: Wallet | null;
+};
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function toUser(row: AuthPayload['user']): User {
+  return {
+    id: row.id,
+    email: row.email,
+    aud: 'authenticated',
+    role: 'authenticated',
+    app_metadata: {},
+    user_metadata: { full_name: row.fullName || '' },
+    created_at: row.createdAt || new Date().toISOString(),
+    updated_at: row.createdAt || new Date().toISOString(),
+  } as User;
+}
+
+async function authRequest(path: string, init?: RequestInit): Promise<{ response: Response; data: any }> {
+  const response = await fetch(path, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    ...init,
+  });
+  let data: any = {};
+  try { data = await response.json(); } catch { /* empty response */ }
+  return { response, data };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [session] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
-
-  // ALWAYS start loading as true to avoid redirecting before Supabase fetch completes
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchUserData = useCallback(async (userId: string) => {
-    try {
-      const load = async () => Promise.all([
-        supabase.from('profiles').select('*').eq('user_id', userId).limit(1).maybeSingle(),
-        supabase.from('wallets').select('*').eq('user_id', userId).limit(1).maybeSingle(),
-        supabase.from('user_roles').select('role').eq('user_id', userId),
-      ]);
-
-      let [profileResult, walletResult, rolesResult] = await load();
-
-      // Self-heal: create profile/wallet rows if they are missing (e.g. first login)
-      if (!profileResult.data || !walletResult.data) {
-        await (supabase as unknown as { rpc: (fn: string) => Promise<unknown> }).rpc('ensure_user_profile');
-        [profileResult, walletResult, rolesResult] = await load();
-      }
-
-      if (profileResult.data) setProfile(profileResult.data as unknown as Profile);
-      if (walletResult.data) setWallet(walletResult.data as Wallet);
-      if (rolesResult.data) {
-        const roles = rolesResult.data.map((row) => row.role as AppRole);
-        setRole(roles.includes('admin') ? 'admin' : roles[0] ?? null);
-      }
-    } catch (error) {
-      console.error('Error fetching user data:', error);
+  const applyPayload = useCallback((payload: AuthPayload | null) => {
+    if (!payload?.user) {
+      setUser(null);
+      setProfile(null);
+      setWallet(null);
+      setRole(null);
+      return;
     }
+    setUser(toUser(payload.user));
+    setProfile(payload.profile);
+    setWallet(payload.wallet);
+    setRole((payload.user.role as AppRole) || 'user');
   }, []);
 
-
-  // Set up realtime subscription for wallet updates
-  useEffect(() => {
-    if (!user) return;
-
-    const walletChannel = supabase
-      .channel(`wallet-updates-${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'wallets',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.new && typeof payload.new === 'object') {
-            setWallet(payload.new as Wallet);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(walletChannel);
-    };
-  }, [user?.id]);
+  const refreshAuth = useCallback(async () => {
+    const { response, data } = await authRequest('/api/auth/me');
+    if (response.ok) applyPayload(data);
+    else applyPayload(null);
+  }, [applyPayload]);
 
   useEffect(() => {
-    let isMounted = true;
-    let initialLoadDone = false;
-
-    // Listener for ONGOING auth changes - does NOT control isLoading
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (!isMounted) return;
-        setSession(session);
-        setUser(session?.user ?? null);
-
-        // Only fetch user data on ONGOING changes (not initial)
-        // Initial load is handled by initializeAuth below
-        if (initialLoadDone) {
-          if (session?.user) {
-            fetchUserData(session.user.id);
-          } else {
-            setProfile(null);
-            setWallet(null);
-            setRole(null);
-          }
-        }
-      }
-    );
-
-    // INITIAL load - controls isLoading, fetches data ONCE
-    // Has a 10-second safety timeout to prevent infinite freeze
-    const initializeAuth = async () => {
-      try {
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Session fetch timed out')), 10000)
-        );
-
-        const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
-        if (!isMounted) return;
-
-        const session = result?.data?.session ?? null;
-        setSession(session);
-        setUser(session?.user ?? null);
-
-        if (session?.user) {
-          // Fetch user data with its own timeout
-          try {
-            await Promise.race([
-              fetchUserData(session.user.id),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('Data fetch timed out')), 10000))
-            ]);
-          } catch (e) {
-            console.warn('User data fetch timed out, will retry on next action');
-          }
-        }
-      } catch (err) {
-        console.warn('initializeAuth timed out or failed:', err);
-        // Still allow the page to render (show login form)
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-          initialLoadDone = true;
-        }
-      }
-    };
-
-    initializeAuth();
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
-  }, [fetchUserData]);
+    refreshAuth()
+      .catch(() => applyPayload(null))
+      .finally(() => setIsLoading(false));
+  }, [refreshAuth, applyPayload]);
 
   const signIn = async (email: string, password: string) => {
-    console.log('--- useAuth: signIn started ---');
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password,
+      const { response, data } = await authRequest('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
-
-      if (error) {
-        console.error('--- useAuth: signIn error ---', error.message);
-        return { error: error as Error };
-      }
-
-      console.log('--- useAuth: signIn success ---');
+      if (!response.ok) return { error: new Error(data.error || 'Invalid email or password') };
+      applyPayload(data);
       return { error: null };
     } catch (error) {
-      console.error('--- useAuth: signIn catch ---', error);
       return { error: error as Error };
     }
   };
 
   const signUp = async (email: string, password: string, fullName?: string) => {
-    console.log('--- useAuth: signUp started (direct bypass) ---');
     try {
-      const { data, error } = await supabase.functions.invoke('auto-verify-signup', {
-        body: { 
-          email: email.trim().toLowerCase(), 
-          password, 
-          fullName: fullName || '' 
-        }
+      const { response, data } = await authRequest('/api/auth/signup', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password, fullName: fullName || '' }),
       });
-
-      if (error || (data && data.error)) {
-        const errorMsg = error?.message || data?.error || 'Signup failed';
-        console.error('--- useAuth: signUp error ---', errorMsg);
-        return { error: new Error(errorMsg) };
-      }
-
-      console.log('--- useAuth: signUp api success, now logging in ---');
-      
-      // Auto-verify created user, now simply log them in
-      const signInRes = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password,
-      });
-      
-      if (signInRes.error) {
-        console.error('--- useAuth: signIn after custom signup error ---', signInRes.error);
-        return { error: signInRes.error };
-      }
-
-      console.log('--- useAuth: signUp & login success ---');
+      if (!response.ok) return { error: new Error(data.error || 'Unable to create account') };
+      applyPayload(data);
       return { error: null };
     } catch (error) {
-      console.error('--- useAuth: signUp catch ---', error);
       return { error: error as Error };
     }
   };
 
   const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      setProfile(null);
-      setWallet(null);
-      setRole(null);
-    } catch (error) {
-      console.error('Sign out error:', error);
-      // Still clear local state even if sign out fails
-      setProfile(null);
-      setWallet(null);
-      setRole(null);
-    }
+    try { await authRequest('/api/auth/logout', { method: 'POST' }); } finally { applyPayload(null); }
   };
 
-  const refreshProfile = async () => {
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', user.id)
-        .limit(1)
-        .maybeSingle();
-      if (data) setProfile(data as unknown as Profile);
-    }
-  };
-
-  const refreshWallet = async () => {
-    if (user) {
-      const { data } = await supabase
-        .from('wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .limit(1)
-        .maybeSingle();
-      if (data) setWallet(data as Wallet);
-    }
-  };
+  const refreshProfile = async () => { await refreshAuth(); };
+  const refreshWallet = async () => { await refreshAuth(); };
 
   const value = {
-    user,
-    session,
-    profile,
-    wallet,
-    role,
-    isLoading,
+    user, session, profile, wallet, role, isLoading,
     isAdmin: role === 'admin',
-    signIn,
-    signUp,
-    signOut,
-    refreshProfile,
-    refreshWallet,
+    signIn, signUp, signOut, refreshProfile, refreshWallet,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -274,8 +129,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }

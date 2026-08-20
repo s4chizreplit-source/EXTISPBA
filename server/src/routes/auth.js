@@ -20,10 +20,60 @@ function publicUser(row) {
   return {
     id: row.id,
     email: row.email,
-    fullName: row.full_name,
-    role: row.role,
+    fullName: row.profile_full_name || row.full_name || row.raw_user_meta_data?.full_name || '',
+    role: row.role || 'user',
     createdAt: row.created_at,
   };
+}
+
+async function importedUserByEmail(email) {
+  const { rows } = await query(
+    `SELECT u.*, p.full_name AS profile_full_name,
+            COALESCE(
+              (SELECT CASE WHEN ur.role::text = 'admin' THEN 'admin' ELSE ur.role::text END
+               FROM public.user_roles ur
+               WHERE ur.user_id = u.id
+               ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END
+               LIMIT 1),
+              'user'
+            ) AS role
+       FROM auth.users u
+       LEFT JOIN public.profiles p ON p.user_id = u.id
+      WHERE lower(u.email) = $1
+        AND COALESCE(u.deleted_at IS NULL, true)
+      ORDER BY u.created_at ASC
+      LIMIT 1`,
+    [email]
+  );
+  return rows[0];
+}
+
+async function importedUserById(id) {
+  const { rows } = await query(
+    `SELECT u.*, p.full_name AS profile_full_name,
+            COALESCE(
+              (SELECT CASE WHEN ur.role::text = 'admin' THEN 'admin' ELSE ur.role::text END
+               FROM public.user_roles ur
+               WHERE ur.user_id = u.id
+               ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END
+               LIMIT 1),
+              'user'
+            ) AS role
+       FROM auth.users u
+       LEFT JOIN public.profiles p ON p.user_id = u.id
+      WHERE u.id = $1
+      LIMIT 1`,
+    [id]
+  );
+  return rows[0];
+}
+
+async function importedUserData(userId) {
+  const [profile, wallet] = await Promise.all([
+    query('SELECT * FROM public.profiles WHERE user_id = $1 LIMIT 1', [userId]),
+    query('SELECT * FROM public.wallets WHERE user_id = $1 LIMIT 1', [userId]),
+  ]);
+  return { profile: profile.rows[0] || null, wallet: wallet.rows[0] || null };
 }
 
 router.post(
@@ -66,14 +116,14 @@ router.post(
   validate(credentials.pick({ email: true, password: true })),
   ah(async (req, res) => {
     const { email, password } = req.valid;
-    const { rows } = await query('SELECT * FROM users WHERE email = $1', [email]);
-    const user = rows[0];
-    const ok = user && user.is_active && (await bcrypt.compare(password, user.password_hash));
+    const user = await importedUserByEmail(email);
+    const ok = user && user.encrypted_password && (await bcrypt.compare(password, user.encrypted_password));
     if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
 
     req.session.userId = user.id;
     req.session.role = user.role;
-    res.json({ user: publicUser(user) });
+    const data = await importedUserData(user.id);
+    res.json({ user: publicUser(user), ...data });
   })
 );
 
@@ -85,9 +135,10 @@ router.get(
   '/me',
   requireAuth,
   ah(async (req, res) => {
-    const { rows } = await query('SELECT * FROM users WHERE id = $1', [req.session.userId]);
-    if (!rows[0]) return res.status(401).json({ error: 'Not authenticated' });
-    res.json({ user: publicUser(rows[0]) });
+    const user = await importedUserById(req.session.userId);
+    if (!user) return res.status(401).json({ error: 'Not authenticated' });
+    const data = await importedUserData(user.id);
+    res.json({ user: publicUser(user), ...data });
   })
 );
 
