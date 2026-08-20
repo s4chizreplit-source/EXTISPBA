@@ -27,55 +27,62 @@ function publicUser(row) {
 }
 
 async function importedUserByEmail(email) {
-  try {
-    const { rows } = await query(
-      `SELECT u.*, p.full_name AS profile_full_name,
-              COALESCE(
-                (SELECT CASE WHEN ur.role::text = 'admin' THEN 'admin' ELSE ur.role::text END
-                 FROM public.user_roles ur
-                 WHERE ur.user_id = u.id
-                 ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END
-                 LIMIT 1),
-                'user'
-              ) AS role
-         FROM auth.users u
-         LEFT JOIN public.profiles p ON p.user_id = u.id
-        WHERE lower(u.email) = $1
-          AND COALESCE(u.deleted_at IS NULL, true)
-        ORDER BY u.created_at ASC
-        LIMIT 1`,
-      [email]
-    );
-    return rows[0];
-  } catch (e) {
-    if (e.code === '42P01') return null; // auth.users doesn't exist in this env
-    throw e;
+  // Try public.auth_users first (works in all environments including production).
+  // Fall back to auth.users for dev environments that haven't migrated yet.
+  for (const tbl of ['public.auth_users', 'auth.users']) {
+    try {
+      const { rows } = await query(
+        `SELECT u.id, u.email, u.encrypted_password, u.raw_user_meta_data, u.created_at,
+                p.full_name AS profile_full_name,
+                COALESCE(
+                  (SELECT ur.role::text FROM public.user_roles ur
+                    WHERE ur.user_id = u.id
+                    ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END LIMIT 1),
+                  'user'
+                ) AS role
+           FROM ${tbl} u
+           LEFT JOIN public.profiles p ON p.user_id = u.id
+          WHERE lower(u.email) = $1
+          LIMIT 1`,
+        [email]
+      );
+      if (rows[0]) return rows[0];
+      // Table exists but no row — stop searching
+      return null;
+    } catch (e) {
+      if (e.code === '42P01') continue; // table missing, try next
+      throw e;
+    }
   }
+  return null;
 }
 
 async function importedUserById(id) {
-  try {
-    const { rows } = await query(
-      `SELECT u.*, p.full_name AS profile_full_name,
-              COALESCE(
-                (SELECT CASE WHEN ur.role::text = 'admin' THEN 'admin' ELSE ur.role::text END
-                 FROM public.user_roles ur
-                 WHERE ur.user_id = u.id
-                 ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END
-                 LIMIT 1),
-                'user'
-              ) AS role
-         FROM auth.users u
-         LEFT JOIN public.profiles p ON p.user_id = u.id
-        WHERE u.id = $1
-        LIMIT 1`,
-      [id]
-    );
-    return rows[0];
-  } catch (e) {
-    if (e.code === '42P01') return null; // auth.users doesn't exist in this env
-    throw e;
+  for (const tbl of ['public.auth_users', 'auth.users']) {
+    try {
+      const { rows } = await query(
+        `SELECT u.id, u.email, u.encrypted_password, u.raw_user_meta_data, u.created_at,
+                p.full_name AS profile_full_name,
+                COALESCE(
+                  (SELECT ur.role::text FROM public.user_roles ur
+                    WHERE ur.user_id = u.id
+                    ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END LIMIT 1),
+                  'user'
+                ) AS role
+           FROM ${tbl} u
+           LEFT JOIN public.profiles p ON p.user_id = u.id
+          WHERE u.id = $1
+          LIMIT 1`,
+        [id]
+      );
+      if (rows[0]) return rows[0];
+      return null;
+    } catch (e) {
+      if (e.code === '42P01') continue;
+      throw e;
+    }
   }
+  return null;
 }
 
 async function importedUserData(userId) {

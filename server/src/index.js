@@ -20,6 +20,7 @@ import zapupiRoutes from './routes/zapupi.js';
 import bundleRoutes from './routes/bundles.js';
 import userAdminRoutes from './routes/users.js';
 import { startCron } from './cron.js';
+import { seedAuthUsers } from './seeds/seedAuthUsers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -124,6 +125,7 @@ app.use((err, _req, res, _next) => {
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`OrganicSMM Pro API listening on :${PORT}`);
+  seedAuthUsers().catch(e => console.error('[seed] error:', e.message));
   startCron();
 });
 
