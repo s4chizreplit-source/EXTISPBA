@@ -35,7 +35,7 @@ export function Sidebar({ onClose }: SidebarProps) {
           <img src={logo} alt="Extips Panel Pro" className="w-9 h-9 rounded-xl object-cover ring-1 ring-border" />
           <div className="flex flex-col">
             <span className="text-[15px] font-bold tracking-tight leading-tight text-foreground">Extips Panel Pro</span>
-            <span className="text-[9px] font-semibold uppercase tracking-[0.18em] leading-tight text-primary/70">✦ v2.0</span>
+            <span className="text-[9px] font-semibold uppercase tracking-[0.18em] leading-tight text-primary/70">✦ v3.0</span>
           </div>
         </Link>
         <button onClick={onClose} className="lg:hidden w-8 h-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted">

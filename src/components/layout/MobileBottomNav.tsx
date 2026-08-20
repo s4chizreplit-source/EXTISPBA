@@ -43,7 +43,7 @@ export function MobileBottomNav() {
             <img src={logo} alt="Extips Panel Pro" className="w-8 h-8 rounded-lg object-cover ring-1 ring-border shrink-0" />
             <div className="flex flex-col min-w-0">
               <span className="text-[14px] font-bold tracking-tight leading-tight !text-foreground truncate">Extips Panel Pro</span>
-              <span className="text-[8px] font-semibold uppercase tracking-[0.18em] leading-tight text-primary/80">✦ v2.0</span>
+              <span className="text-[8px] font-semibold uppercase tracking-[0.18em] leading-tight text-primary/80">✦ v3.0</span>
             </div>
           </Link>
           <div className="flex items-center gap-2">
