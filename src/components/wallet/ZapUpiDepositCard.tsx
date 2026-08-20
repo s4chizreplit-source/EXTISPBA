@@ -3,8 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Zap, Loader2 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-
 const QUICK_AMOUNTS = [100, 500, 1000, 5000];
 const MIN_AMOUNT = 50;
 const MAX_AMOUNT = 100000;
@@ -48,8 +46,12 @@ export default function ZapUpiDepositCard() {
     while (Date.now() - start < MAX_MS) {
       if (!mountedRef.current) { toast.dismiss(`zap-${orderId}`); return; }
       try {
-        const { data, error } = await supabase.functions.invoke('zapupi-sync-deposit', { body: { order_id: orderId } });
-        if (error) throw error;
+        const r = await fetch('/api/zapupi/sync-deposit', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: orderId }),
+        });
+        const data = r.ok ? await r.json() : null;
         if (!mountedRef.current) { toast.dismiss(`zap-${orderId}`); return; }
         if (data?.status === 'success' || data?.credited) {
           toast.success('🎉 Wallet credited successfully!', { id: `zap-${orderId}` });
@@ -74,32 +76,13 @@ export default function ZapUpiDepositCard() {
     if (inr > MAX_AMOUNT) return toast.error(`Maximum deposit is ₹${MAX_AMOUNT}`);
     setLoading(true);
     try {
-      // Always attach a fresh access token — invoke() can send a stale/empty one
-      let { data: sess } = await supabase.auth.getSession();
-      if (!sess.session) {
-        const refreshed = await supabase.auth.refreshSession();
-        sess = { session: refreshed.data.session } as any;
-      }
-      const accessToken = sess.session?.access_token;
-      if (!accessToken) {
-        setLoading(false);
-        return toast.error('Session expired — please sign in again.');
-      }
-      const { data, error } = await supabase.functions.invoke('zapupi-create-order', {
-        body: { amount_inr: inr },
-        headers: { Authorization: `Bearer ${accessToken}` },
+      const res = await fetch('/api/zapupi/create-order', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount_inr: inr }),
       });
-
-      if (error) {
-        // Surface the real server message instead of the generic non-2xx text
-        let msg = error.message;
-        try {
-          const ctx: any = (error as any).context;
-          if (ctx?.json) { const b = await ctx.json(); msg = b?.error || msg; }
-          else if (ctx?.text) { const t = await ctx.text(); msg = t || msg; }
-        } catch { /* keep default */ }
-        throw new Error(msg);
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Could not start payment');
       if (!data?.payment_url) throw new Error(data?.error || 'No payment URL');
       window.location.href = data.payment_url;
     } catch (e: any) {

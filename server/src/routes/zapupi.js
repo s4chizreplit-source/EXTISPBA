@@ -1,0 +1,188 @@
+/**
+ * ZapUPI payment gateway routes.
+ * Replaces Supabase Edge Functions: zapupi-create-order, zapupi-sync-deposit, zapupi-webhook
+ */
+
+import express from 'express';
+import { query, withTx } from '../db.js';
+import { ah, requireAuth } from '../middleware/auth.js';
+
+const router = express.Router();
+
+const CREATE_URL  = 'https://pay.zapupi.com/api/create-order';
+const STATUS_URL  = 'https://pay.zapupi.com/api/order-status';
+const USD_RATE    = 83.5;
+const MIN_INR     = 50;
+const MAX_INR     = 100000;
+
+function getZapKey() {
+  return process.env.ZAPUPI_API_KEY || '';
+}
+
+/** POST form-encoded, then retry as JSON if needed */
+async function zapCall(url, params) {
+  async function attempt(mode) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': mode === 'form' ? 'application/x-www-form-urlencoded' : 'application/json' },
+      body: mode === 'form' ? new URLSearchParams(params).toString() : JSON.stringify(params),
+      signal: AbortSignal.timeout(20000),
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    return { ok: res.ok, status: res.status, data };
+  }
+  const r1 = await attempt('form');
+  const ok1 = r1.ok && String(r1.data?.status || '').toLowerCase() === 'success';
+  if (ok1) return r1.data;
+  const r2 = await attempt('json');
+  return r2.data;
+}
+
+/** Credit wallet using DB function (idempotent — safe to call multiple times) */
+async function creditWallet({ userId, orderId, amountInr, txnId, utr }) {
+  const amountUsd = Number((amountInr / USD_RATE).toFixed(4));
+  const { rows } = await query(
+    `SELECT * FROM credit_wallet_zapupi($1, $2, $3, $4, $5, $6)`,
+    [userId, orderId, amountUsd, amountInr, txnId || null, utr || null]
+  );
+  return rows[0];
+}
+
+// ─── POST /api/zapupi/create-order ───────────────────────────────────────────
+router.post('/create-order', requireAuth, ah(async (req, res) => {
+  const ZAP_KEY = getZapKey();
+  if (!ZAP_KEY) return res.status(500).json({ error: 'ZapUPI not configured' });
+
+  const amountInr = Math.floor(Number(req.body?.amount_inr) || 0);
+  if (!amountInr || amountInr < MIN_INR)  return res.status(400).json({ error: `Minimum deposit is ₹${MIN_INR}` });
+  if (amountInr > MAX_INR) return res.status(400).json({ error: `Maximum deposit is ₹${MAX_INR}` });
+
+  const userId  = req.session.userId;
+  const orderId = `zap_${userId.slice(0, 8)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  // Insert pending row first (so webhook can find it)
+  await query(
+    `INSERT INTO zapupi_deposits (user_id, order_id, amount_inr, status) VALUES ($1,$2,$3,'pending')`,
+    [userId, orderId, amountInr]
+  );
+
+  // Determine origin for redirect URLs
+  const origin = (req.headers.origin || req.headers.referer || 'https://extipspanel.pro').replace(/\/$/, '');
+  const webhookUrl = `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : origin}/api/zapupi/webhook`;
+
+  const payload = {
+    zap_key: ZAP_KEY,
+    order_id: orderId,
+    amount: String(amountInr),
+    customer_mobile: '9999999999',
+    remark: `Wallet Top-up | ${userId}`,
+    webhook_url: webhookUrl,
+    success_url: `${origin}/wallet?deposit=success&order_id=${orderId}`,
+    failed_url:  `${origin}/wallet?deposit=failed&order_id=${orderId}`,
+    timeout_url: `${origin}/wallet?deposit=timeout&order_id=${orderId}`,
+  };
+
+  const data = await zapCall(CREATE_URL, payload);
+  const paymentUrl = data?.payment_url || data?.data?.payment_url || data?.data?.url || data?.url;
+
+  if (!paymentUrl) {
+    await query(`UPDATE zapupi_deposits SET status='failed', raw_response=$1 WHERE order_id=$2`, [data, orderId]);
+    return res.status(502).json({ error: data?.message || data?.msg || data?.error || 'No payment URL returned' });
+  }
+
+  await query(
+    `UPDATE zapupi_deposits SET payment_url=$1, txn_id=$2, raw_response=$3 WHERE order_id=$4`,
+    [paymentUrl, data?.txn_id || data?.order_id || null, data, orderId]
+  );
+
+  res.json({ success: true, payment_url: paymentUrl, order_id: orderId, amount_inr: amountInr });
+}));
+
+// ─── POST /api/zapupi/sync-deposit ───────────────────────────────────────────
+router.post('/sync-deposit', requireAuth, ah(async (req, res) => {
+  const ZAP_KEY = getZapKey();
+  if (!ZAP_KEY) return res.status(500).json({ error: 'ZapUPI not configured' });
+
+  const orderId = String(req.body?.order_id || '').trim();
+  if (!orderId) return res.status(400).json({ error: 'order_id required' });
+
+  const userId = req.session.userId;
+  const { rows: deps } = await query(
+    `SELECT * FROM zapupi_deposits WHERE order_id=$1 AND user_id=$2`,
+    [orderId, userId]
+  );
+  const deposit = deps[0];
+  if (!deposit) return res.status(404).json({ error: 'Deposit not found' });
+  if (deposit.credited) return res.json({ status: 'success', credited: true, already: true });
+
+  // Ask ZapUPI for status
+  const data = await zapCall(STATUS_URL, { zap_key: ZAP_KEY, order_id: orderId });
+  const node = data?.data || data?.result || data;
+  const statusStr = String(node?.status || node?.payment_status || data?.status || '').toLowerCase();
+
+  const isSuccess = ['success','completed','paid','settlement'].includes(statusStr) || data?.success === true;
+  const isFailed  = ['failed','failure','expired'].includes(statusStr);
+
+  if (isSuccess) {
+    const inr   = Number(node?.amount || node?.pay_amount || deposit.amount_inr);
+    const txnId = node?.utr || node?.txn_id || node?.upi_txn_id || deposit.txn_id || null;
+    const utr   = node?.utr || node?.bank_ref || null;
+    await creditWallet({ userId, orderId, amountInr: inr, txnId, utr });
+    return res.json({ status: 'success', credited: true });
+  }
+
+  if (isFailed) {
+    await query(`UPDATE zapupi_deposits SET status='failed', raw_response=$1 WHERE order_id=$2`, [data, orderId]);
+    return res.json({ status: 'failed' });
+  }
+
+  return res.json({ status: 'pending' });
+}));
+
+// ─── POST /api/zapupi/webhook ─────────────────────────────────────────────────
+// ZapUPI calls this when a payment completes. Always return 200.
+router.post('/webhook', ah(async (req, res) => {
+  res.json({ received: true }); // acknowledge immediately
+
+  try {
+    const ZAP_KEY = getZapKey();
+    if (!ZAP_KEY) return;
+
+    const payload = req.body || {};
+    const orderId = (
+      payload.order_id || payload.client_txn_id || payload.user_token ||
+      payload.data?.order_id || payload.data?.client_txn_id || ''
+    ).toString().trim();
+
+    if (!orderId || !orderId.startsWith('zap_')) {
+      console.warn('[zapupi-webhook] unknown order_id:', orderId);
+      return;
+    }
+
+    const { rows: deps } = await query(
+      `SELECT * FROM zapupi_deposits WHERE order_id=$1`, [orderId]
+    );
+    const deposit = deps[0];
+    if (!deposit || deposit.credited) return;
+
+    // Verify with ZapUPI before crediting
+    const data = await zapCall(STATUS_URL, { zap_key: ZAP_KEY, order_id: orderId });
+    const node = data?.data || data?.result || data;
+    const statusStr = String(node?.status || data?.status || '').toLowerCase();
+    const isSuccess = ['success','completed','paid','settlement'].includes(statusStr);
+
+    if (!isSuccess) return;
+
+    const inr   = Number(node?.amount || node?.pay_amount || deposit.amount_inr);
+    const txnId = node?.utr || node?.txn_id || payload.txn_id || null;
+    const utr   = node?.utr || node?.bank_ref || null;
+    await creditWallet({ userId: deposit.user_id, orderId, amountInr: inr, txnId, utr });
+    console.log(`[zapupi-webhook] ✅ credited ₹${inr} for order ${orderId}`);
+  } catch (e) {
+    console.error('[zapupi-webhook] error:', e.message);
+  }
+}));
+
+export default router;

@@ -16,6 +16,7 @@ import serviceRoutes from './routes/services.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import engagementOrderRoutes from './routes/engagement-orders.js';
+import zapupiRoutes from './routes/zapupi.js';
 import { startCron } from './cron.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +70,7 @@ app.use('/api/services', serviceRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/engagement-orders', engagementOrderRoutes);
+app.use('/api/zapupi', zapupiRoutes);
 
 // Dashboard stats — single DB round-trip
 app.get('/api/dashboard/stats', requireAuth, ah(async (req, res) => {
