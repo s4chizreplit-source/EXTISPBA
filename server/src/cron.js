@@ -237,6 +237,21 @@ async function dispatchRun(run) {
 
 export function startCron() {
   console.log(`[cron] Organic run dispatcher started (batch=${BATCH_SIZE}, tick=${TICK_MS / 1000}s)`);
+
+  // Reset runs that were mid-dispatch when the server last restarted.
+  // Any row stuck in 'started' for > 5 min is orphaned — put it back to pending.
+  query(`
+    UPDATE organic_run_schedule
+       SET status = 'pending',
+           retry_count = GREATEST(retry_count, 1),
+           error_message = 'Reset: server restarted mid-dispatch',
+           started_at = NULL
+     WHERE status = 'started'
+       AND started_at < now() - interval '5 minutes'
+  `).then(r => {
+    if (r.rowCount > 0) console.log(`[cron] ♻ Reset ${r.rowCount} orphaned 'started' run(s) to pending`);
+  }).catch(e => console.error('[cron] Orphan reset error:', e));
+
   setTimeout(() => {
     processBatch().catch(e => console.error('[cron] Batch error:', e));
     setInterval(() => {
