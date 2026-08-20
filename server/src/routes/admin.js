@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query, withTx } from '../db.js';
 import { ah, validate, requireAdmin } from '../middleware/auth.js';
 import { fetchProviderBalance, providerConfigured } from '../provider.js';
+import { seedAllData } from '../seeds/seedAllData.js';
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -378,6 +379,23 @@ router.patch(
       return { status, refunded: false };
     });
     res.json(out);
+  })
+);
+
+// ── Manual seed trigger (one-time data import) ────────────────────────────
+router.post(
+  '/run-seed',
+  ah(async (_req, res) => {
+    console.log('[seed] Manual seed triggered via admin API');
+    await seedAllData();
+    const { rows } = await query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM public.profiles)             AS profiles,
+        (SELECT COUNT(*)::int FROM public.wallets)              AS wallets,
+        (SELECT COUNT(*)::int FROM public.engagement_bundles)   AS bundles,
+        (SELECT COUNT(*)::int FROM public.engagement_orders)    AS eng_orders
+    `);
+    res.json({ ok: true, counts: rows[0] });
   })
 );
 
