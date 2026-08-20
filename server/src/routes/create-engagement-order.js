@@ -170,7 +170,7 @@ function uniquifyScheduledRuns(runs, totalTargetQty, providerMin, maxBatchCap) {
   }));
 }
 
-/** Generate a fallback run schedule from scratch (no preview runs provided) */
+/** Generate a fully organic run schedule with randomised quantities and gaps */
 function generateRunSchedule(engagement, providerMin, maxBatchCap, initialDelayMs, timeLimitHours) {
   const config = getServiceConfig(engagement.type);
   const startTime = Date.now() + initialDelayMs;
@@ -199,31 +199,68 @@ function generateRunSchedule(engagement, providerMin, maxBatchCap, initialDelayM
     if (targetRuns < 2 && engagement.quantity >= providerMin * 2) targetRuns = 2;
   }
 
-  const runs = [];
-  let remaining = engagement.quantity;
-  let currentTime = startTime;
-  let runNumber = 1;
+  // ── Organic quantity distribution ─────────────────────────────────────────
+  // Instead of dividing evenly, assign random weights then scale to total.
+  const cap   = maxBatchCap;
+  const floor = providerMin;
+  const total = engagement.quantity;
 
-  while (remaining > 0 && runNumber <= targetRuns) {
-    const isLast = runNumber === targetRuns || remaining <= maxBatchCap;
-    const qty = isLast ? remaining : Math.min(maxBatchCap, Math.max(providerMin, Math.ceil(remaining / (targetRuns - runNumber + 1))));
-    const scheduledAt = new Date(currentTime + (Math.random() * 2 - 1) * 2 * 60 * 1000);
+  // Generate random weights (0.5 – 1.5 range for each run)
+  const weights = Array.from({ length: targetRuns }, () => 0.5 + Math.random());
+  const weightSum = weights.reduce((s, w) => s + w, 0);
+
+  // Scale to total, clamp to [floor, cap]
+  let quantities = weights.map(w => Math.max(floor, Math.min(cap, Math.round((w / weightSum) * total))));
+
+  // Reconcile drift so quantities sum exactly to total
+  let drift = total - quantities.reduce((s, q) => s + q, 0);
+  let guard = 0;
+  while (drift !== 0 && guard < 10000) {
+    guard++;
+    const idx = Math.floor(Math.random() * quantities.length);
+    const step = drift > 0 ? 1 : -1;
+    const next = quantities[idx] + step;
+    if (next >= floor && next <= cap) {
+      quantities[idx] = next;
+      drift -= step;
+    }
+  }
+  // Last-resort: dump remainder into last run
+  if (drift !== 0) quantities[quantities.length - 1] = Math.max(floor, quantities[quantities.length - 1] + drift);
+
+  // ── Organic timing ─────────────────────────────────────────────────────────
+  const runs = [];
+  let currentTime = startTime;
+  const usedGapMinutes = new Set();
+
+  for (let i = 0; i < targetRuns; i++) {
+    const scheduledAt = new Date(currentTime + (Math.random() * 2 - 1) * 90 * 1000);
     if (scheduledAt.getTime() < Date.now() + 30000) scheduledAt.setTime(Date.now() + 30000);
 
     runs.push({
-      run_number: runNumber,
+      run_number: i + 1,
       scheduled_at: scheduledAt.toISOString(),
-      quantity_to_send: qty,
-      base_quantity: qty,
-      variance_applied: 0,
+      quantity_to_send: quantities[i],
+      base_quantity: quantities[i],
+      variance_applied: Math.round((quantities[i] / (total / targetRuns) - 1) * 100),
       peak_multiplier: 1,
       status: 'pending',
     });
 
-    remaining -= qty;
-    const interval = (baseInterval + (Math.random() * 2 - 1) * intervalRange) * 60 * 1000;
-    currentTime += Math.max(5 * 60 * 1000, interval);
-    runNumber++;
+    // Organic gap: pick a gap that hasn't been used before
+    let gap = 0;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const wobble = 0.55 + Math.random() * 1.2;
+      const burst  = Math.random() < 0.15 ? 0.4 : 1;
+      const mins   = Math.max(4, Math.round(baseInterval * wobble * burst));
+      if (!usedGapMinutes.has(mins)) {
+        usedGapMinutes.add(mins);
+        gap = mins * 60 * 1000 + Math.floor(Math.random() * 60) * 1000;
+        break;
+      }
+    }
+    if (!gap) gap = Math.round(baseInterval * 60 * 1000) + Math.floor(Math.random() * 180000);
+    currentTime += gap;
   }
 
   return runs;

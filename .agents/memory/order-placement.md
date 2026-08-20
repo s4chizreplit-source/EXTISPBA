@@ -28,5 +28,15 @@ Both files used `FROM users` / `INSERT INTO users` / `UPDATE users` — correct 
 
 **Fixed files:** `server/src/routes/auth.js` (lines ~105, 112, 116, 167, 200), `server/src/routes/admin.js` (users list + patch routes).
 
+## Cron status-check (real delivery verification)
+Runs were previously marked `completed` immediately after placing provider order (`action=add`). Fixed flow:
+1. After `action=add` succeeds → mark run `processing` (not completed)
+2. `checkProcessingRuns()` runs every 15s → polls `action=status` for all `processing` runs (bulk first, then individual fallback)
+3. Provider says "Completed" → mark `completed` with `provider_status`, `provider_remains`, `provider_start_count`, `provider_charge`
+4. Provider says "Canceled" → mark `failed`
+5. Startup auto-re-queues existing `completed` runs with no `provider_status` (7-day window) for retroactive verification
+
+Quantity randomization: `generateRunSchedule` now assigns random weights per run, reconciles to exact total, avoids uniform distribution.
+
 ## VPS historical orders missing item data
 Production `engagement_order_items` = 0 rows for order_numbers 1–2695 (dev has 5,901). `organic_run_schedule` = 0 rows (dev has 71,737). Only `engagement_orders` was seeded. New orders placed after fix have correct items + runs. Historical orders show 0/0 — tracked as follow-up task.

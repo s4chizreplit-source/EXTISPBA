@@ -1,6 +1,13 @@
 /**
  * Organic run dispatcher — runs every 15 seconds.
  *
+ * Flow for each run:
+ *   1. Lock pending runs → mark 'started'
+ *   2. Call provider `action=add` → get provider order ID
+ *   3. Mark run as 'processing' (NOT completed yet — order placed, not delivered)
+ *   4. Separate status-check loop polls `action=status` every tick
+ *   5. When provider reports "Completed" → mark run 'completed'
+ *
  * Provider rotation:
  *   For each run, try providers in sort_order (priority 1 first).
  *   If a provider rejects "active order with this link" → try the next.
@@ -13,8 +20,9 @@
 
 import { query, withTx } from './db.js';
 
-const BATCH_SIZE = 25;
-const TICK_MS    = 15_000;
+const BATCH_SIZE        = 25;
+const TICK_MS           = 15_000;
+const STATUS_BATCH_SIZE = 50;   // how many 'processing' runs to status-check per tick
 
 /** True when the provider error means "same link is already active". */
 function isActiveLinkError(msg = '') {
@@ -48,6 +56,8 @@ async function callAccount({ api_url, api_key }, params, timeoutMs = 20_000) {
   }
 }
 
+// ── Dispatch pending runs ─────────────────────────────────────────────────────
+
 async function processBatch() {
   const runs = await withTx(async (client) => {
     // Step 1 — lock BATCH_SIZE distinct pending run rows (no JOIN fan-out).
@@ -76,7 +86,6 @@ async function processBatch() {
     );
 
     // Step 3 — fetch full details + ALL provider accounts ordered by priority.
-    //           One row per (run × provider_account); we group in JS.
     const { rows } = await client.query(`
       SELECT
         ors.id,
@@ -117,7 +126,6 @@ async function processBatch() {
           providers: [],
         });
       }
-      // Only add a provider row if it has usable credentials
       if (row.account_id && row.api_url && row.api_key && row.provider_service_id) {
         byRun.get(row.id).providers.push({
           account_id:          row.account_id,
@@ -155,7 +163,7 @@ async function dispatchRun(run) {
   }
 
   // ── Try providers in priority order ─────────────────────────────────────
-  let allBusy  = true;   // flips to false on any non-"active-link" outcome
+  let allBusy  = true;
   let lastErr  = null;
 
   for (const prov of providers) {
@@ -174,31 +182,30 @@ async function dispatchRun(run) {
       const providerOrderId = String(data.order ?? data.id ?? '');
       if (!providerOrderId) throw new Error('Provider returned no order id');
 
-      // ✅ Success
+      // ✅ Order placed — mark as 'processing', NOT completed yet
+      // Real completion is confirmed by the status-check loop below.
       allBusy = false;
       await query(
         `UPDATE organic_run_schedule
-            SET status='completed',
-                completed_at=now(),
+            SET status='processing',
+                started_at=now(),
                 provider_order_id=$1,
                 provider_response=$2,
                 provider_account_id=$3,
-                provider_account_name=(SELECT name FROM provider_accounts WHERE id=$3)
+                provider_account_name=(SELECT name FROM provider_accounts WHERE id=$3),
+                last_status_check=now()
           WHERE id=$4`,
         [providerOrderId, JSON.stringify({ order: providerOrderId }), prov.account_id, run.id]
       );
-      // Update LRU stamp so next run rotates to the least-recently-used provider
       query(`UPDATE provider_accounts SET last_used_at=now() WHERE id=$1`, [prov.account_id]).catch(() => {});
-      console.log(`[cron] ✅ Run ${run.id} → provider order ${providerOrderId}`);
+      console.log(`[cron] 📤 Run ${run.id} → provider order ${providerOrderId} (processing)`);
       return;
 
     } catch (err) {
       if (isActiveLinkError(err.message)) {
-        // This provider has an active order for the same link — try next
         console.log(`[cron] ↩ Run ${run.id}: provider busy (${prov.account_id.slice(0,8)}…), trying next`);
         continue;
       }
-      // Real error (timeout, bad API response, etc.) — don't try more providers
       allBusy  = false;
       lastErr  = err;
       break;
@@ -235,11 +242,169 @@ async function dispatchRun(run) {
   console.warn(`[cron] ❌ Run ${run.id} failed (attempt ${retryCount}): ${lastErr?.message}`);
 }
 
+// ── Status-check loop: poll provider for 'processing' runs ───────────────────
+
+async function checkProcessingRuns() {
+  // Fetch runs in 'processing' state that haven't been checked in the last 30s
+  const { rows: runs } = await query(`
+    SELECT
+      ors.id,
+      ors.provider_order_id,
+      ors.quantity_to_send,
+      ors.engagement_order_item_id,
+      pa.id       AS account_id,
+      pa.api_url,
+      pa.api_key,
+      pa.name     AS account_name,
+      COALESCE(pa.delivery_multiplier, 1) AS delivery_multiplier
+    FROM organic_run_schedule ors
+    JOIN provider_accounts pa ON pa.id = ors.provider_account_id
+    WHERE ors.status = 'processing'
+      AND ors.provider_order_id IS NOT NULL
+      AND pa.is_active = true
+      AND (ors.last_status_check IS NULL OR ors.last_status_check < now() - interval '30 seconds')
+    ORDER BY ors.last_status_check ASC NULLS FIRST
+    LIMIT $1
+  `, [STATUS_BATCH_SIZE]);
+
+  if (runs.length === 0) return;
+
+  // Group by provider account so we can batch-check where possible
+  const byAccount = new Map();
+  for (const run of runs) {
+    if (!byAccount.has(run.account_id)) {
+      byAccount.set(run.account_id, { prov: run, runs: [] });
+    }
+    byAccount.get(run.account_id).runs.push(run);
+  }
+
+  await Promise.allSettled(
+    Array.from(byAccount.values()).map(({ prov, runs: acctRuns }) =>
+      checkAccountStatuses(prov, acctRuns)
+    )
+  );
+}
+
+async function checkAccountStatuses(prov, runs) {
+  // Try bulk first (comma-separated order IDs), fall back to individual
+  const orderIds = runs.map(r => r.provider_order_id);
+
+  let statusMap = new Map(); // orderId → status data
+
+  try {
+    // Many SMM panels support: action=status&orders=1,2,3
+    const data = await callAccount(prov, {
+      action: 'status',
+      orders: orderIds.join(','),
+    }, 30_000);
+
+    // Response is either an array or an object keyed by order ID
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        const id = String(item.order ?? item.id ?? '');
+        if (id) statusMap.set(id, item);
+      }
+    } else if (data && typeof data === 'object') {
+      for (const [key, val] of Object.entries(data)) {
+        statusMap.set(String(key), val);
+      }
+    }
+  } catch {
+    // Bulk not supported — fall back to individual checks
+    for (const run of runs) {
+      try {
+        const data = await callAccount(prov, {
+          action: 'status',
+          order:  run.provider_order_id,
+        }, 15_000);
+        statusMap.set(run.provider_order_id, data);
+      } catch {
+        // Mark as checked so we don't spam
+        await query(
+          `UPDATE organic_run_schedule SET last_status_check=now() WHERE id=$1`,
+          [run.id]
+        ).catch(() => {});
+      }
+    }
+  }
+
+  // Apply status updates
+  await Promise.allSettled(runs.map(run => applyStatus(run, statusMap.get(run.provider_order_id))));
+}
+
+const COMPLETED_STATUSES  = new Set(['completed', 'complete']);
+const CANCELLED_STATUSES  = new Set(['canceled', 'cancelled', 'refunded']);
+const IN_PROGRESS_STATUSES = new Set(['in progress', 'inprogress', 'processing', 'pending', 'partial']);
+
+async function applyStatus(run, data) {
+  // Always update last_status_check
+  const rawStatus  = String(data?.status ?? '').toLowerCase().trim();
+  const remains    = data?.remains    !== undefined ? Number(data.remains)    : null;
+  const startCount = data?.start_count !== undefined ? Number(data.start_count) : null;
+  const charge     = data?.charge     !== undefined ? Number(data.charge)     : null;
+
+  if (!data || !rawStatus) {
+    // No data — just bump the timestamp
+    await query(
+      `UPDATE organic_run_schedule SET last_status_check=now() WHERE id=$1`,
+      [run.id]
+    ).catch(() => {});
+    return;
+  }
+
+  if (COMPLETED_STATUSES.has(rawStatus)) {
+    // Provider confirms delivery done
+    await query(
+      `UPDATE organic_run_schedule
+          SET status='completed',
+              completed_at=now(),
+              provider_status=$1,
+              provider_remains=$2,
+              provider_start_count=$3,
+              provider_charge=$4,
+              last_status_check=now()
+        WHERE id=$5 AND status='processing'`,
+      [rawStatus, remains, startCount, charge, run.id]
+    );
+    console.log(`[cron] ✅ Run ${run.id} confirmed completed by provider (order ${run.provider_order_id})`);
+
+  } else if (CANCELLED_STATUSES.has(rawStatus)) {
+    // Provider cancelled — fail the run so the order can be refunded/retried
+    await query(
+      `UPDATE organic_run_schedule
+          SET status='failed',
+              completed_at=now(),
+              provider_status=$1,
+              provider_remains=$2,
+              provider_charge=$3,
+              error_message='Provider cancelled: ' || $1,
+              last_status_check=now()
+        WHERE id=$4 AND status='processing'`,
+      [rawStatus, remains, charge, run.id]
+    );
+    console.warn(`[cron] ⚠️ Run ${run.id} cancelled by provider (${rawStatus})`);
+
+  } else {
+    // Still in progress — update fields and wait for next tick
+    await query(
+      `UPDATE organic_run_schedule
+          SET provider_status=$1,
+              provider_remains=$2,
+              provider_start_count=$3,
+              provider_charge=$4,
+              last_status_check=now()
+        WHERE id=$5`,
+      [rawStatus, remains, startCount, charge, run.id]
+    );
+  }
+}
+
+// ── Startup + scheduling ──────────────────────────────────────────────────────
+
 export function startCron() {
   console.log(`[cron] Organic run dispatcher started (batch=${BATCH_SIZE}, tick=${TICK_MS / 1000}s)`);
 
   // Reset runs that were mid-dispatch when the server last restarted.
-  // Any row stuck in 'started' for > 5 min is orphaned — put it back to pending.
   query(`
     UPDATE organic_run_schedule
        SET status = 'pending',
@@ -252,10 +417,27 @@ export function startCron() {
     if (r.rowCount > 0) console.log(`[cron] ♻ Reset ${r.rowCount} orphaned 'started' run(s) to pending`);
   }).catch(e => console.error('[cron] Orphan reset error:', e));
 
+  // Also move any existing 'completed' runs that have no provider_status back to 'processing'
+  // so the status-check loop picks them up. This handles runs placed before this fix.
+  query(`
+    UPDATE organic_run_schedule
+       SET status = 'processing',
+           last_status_check = NULL
+     WHERE status = 'completed'
+       AND provider_order_id IS NOT NULL
+       AND provider_order_id NOT LIKE 'sim_%'
+       AND provider_status IS NULL
+       AND completed_at > now() - interval '7 days'
+  `).then(r => {
+    if (r.rowCount > 0) console.log(`[cron] 🔄 Re-queued ${r.rowCount} unverified run(s) for status check`);
+  }).catch(e => console.error('[cron] Re-queue error:', e));
+
   setTimeout(() => {
-    processBatch().catch(e => console.error('[cron] Batch error:', e));
-    setInterval(() => {
-      processBatch().catch(e => console.error('[cron] Batch error:', e));
-    }, TICK_MS);
+    const tick = () => {
+      processBatch().catch(e => console.error('[cron] Dispatch error:', e));
+      checkProcessingRuns().catch(e => console.error('[cron] Status-check error:', e));
+    };
+    tick();
+    setInterval(tick, TICK_MS);
   }, 5000);
 }
