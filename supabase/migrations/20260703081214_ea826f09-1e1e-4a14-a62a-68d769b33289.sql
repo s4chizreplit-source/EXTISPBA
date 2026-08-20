@@ -1,0 +1,1 @@
+ALTER TABLE public.engagement_presets ADD COLUMN IF NOT EXISTS default_link text;

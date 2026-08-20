@@ -1,0 +1,1 @@
+ALTER TABLE public.engagement_orders ADD COLUMN IF NOT EXISTS campaign_name TEXT;

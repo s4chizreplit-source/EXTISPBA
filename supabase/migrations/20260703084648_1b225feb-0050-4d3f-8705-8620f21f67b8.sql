@@ -1,0 +1,4 @@
+ALTER TABLE public.engagement_presets 
+  ADD COLUMN IF NOT EXISTS saves integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS shares integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS reposts integer NOT NULL DEFAULT 0;

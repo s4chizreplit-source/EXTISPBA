@@ -1,0 +1,468 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800;900&family=Outfit:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap&font-display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hide number input spinners globally */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+@layer base {
+  :root {
+    /* ════ EXTIPS BLUE — Bright Sky (crisp white bg, light-blue tint) ════ */
+    --background: 206 100% 99.5%;
+    --foreground: 222 60% 13%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 60% 13%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 60% 13%;
+
+    --primary: 218 90% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 205 90% 97%;
+    --secondary-foreground: 220 60% 22%;
+
+    --muted: 205 80% 97%;
+    --muted-foreground: 217 22% 44%;
+
+    --accent: 200 92% 52%;
+    --accent-foreground: 0 0% 100%;
+
+    --success: 160 72% 34%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 32 92% 42%;
+    --warning-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 47%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 208 55% 91%;
+    --input: 208 55% 90%;
+    --ring: 226 78% 38%;
+
+    --radius: 1rem;
+
+    --shadow-soft: 0 6px 24px rgba(15,30,70,.10);
+    --shadow-glow: 0 0 30px rgba(29,64,175,.22);
+  }
+}
+
+
+html {
+  font-size: 16px;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply text-foreground;
+    /* Landing-page canvas: soft sky-blue wash */
+    background-color: hsl(var(--background));
+    background-image: linear-gradient(180deg, hsl(215 100% 95%) 0%, hsl(212 100% 96%) 45%, hsl(210 100% 97%) 100%);
+
+    background-attachment: fixed;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    color: hsl(var(--foreground));
+    text-shadow: none;
+  }
+
+  label, .label {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    @apply text-muted-foreground text-[12px];
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer components {
+
+  .glass-card {
+    @apply relative overflow-hidden rounded-3xl border;
+    background: #ffffff;
+    border-color: hsl(208 60% 93%);
+    box-shadow: 0 14px 40px rgba(20,50,110,.08);
+    backdrop-filter: blur(12px);
+    color: hsl(var(--foreground));
+  }
+
+
+  .three-d-card { @apply glass-card; }
+  .glass-premium { @apply glass-card; }
+
+  .glass-panel {
+    @apply rounded-3xl bg-card border border-border;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent font-extrabold;
+    background-image: linear-gradient(135deg, hsl(221 83% 48%), hsl(205 90% 52%));
+  }
+
+
+  /* ════ BUTTONS ════ */
+  .btn-3d {
+    @apply relative overflow-hidden font-bold rounded-xl flex items-center justify-center transition-all duration-200;
+    background: linear-gradient(135deg, hsl(221 83% 53%), hsl(210 90% 48%));
+    color: white;
+    box-shadow: 0 4px 16px rgba(37,99,235, 0.28);
+  }
+
+  .btn-3d:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(37,99,235, 0.38);
+  }
+
+  .btn-3d:active { transform: translateY(0); }
+
+  .btn-glass {
+    @apply relative overflow-hidden font-bold rounded-xl bg-secondary text-foreground border border-border transition-all duration-200;
+  }
+
+  .btn-glass:hover {
+    @apply bg-muted;
+  }
+
+  /* ════ NAVIGATION ════ */
+  .nav-link {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground font-semibold transition-colors;
+  }
+
+  .nav-link-active {
+    @apply text-primary bg-primary/10 border border-primary/20;
+  }
+
+  /* ════ INPUTS ════ */
+  .input-3d {
+    @apply bg-card border-border rounded-xl font-medium transition-all text-foreground;
+  }
+
+  .input-3d:focus {
+    @apply border-primary ring-2 ring-primary/20 outline-none;
+  }
+
+  .glow-neon {
+    box-shadow: 0 0 16px rgba(37,99,235, 0.20);
+  }
+
+  /* Chrome autofill fix — light */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 100px hsl(0 0% 100%) inset !important;
+    -webkit-text-fill-color: hsl(224 64% 12%) !important;
+    caret-color: hsl(224 64% 12%) !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* Light-theme polish for inner dashboard pages */
+  main .bg-white { background-color: hsl(var(--card)) !important; }
+  main .text-black { color: hsl(var(--foreground)) !important; }
+  main .bg-gray-50, main .bg-slate-50, main .bg-blue-50 { background-color: hsl(var(--secondary)) !important; }
+
+}
+
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.15) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.2);
+    border-radius: 10px;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   LIGHT THEME REMAP
+   Many pages were authored with hardcoded dark surfaces
+   (bg-black, bg-[#0a0a14], bg-white/5, border-white/10, text-white/70).
+   Remap them to the light Extips Blue palette app-wide.
+   ════════════════════════════════════════════════════════════════ */
+body .bg-black,
+body .bg-black\/80,
+body .bg-black\/70,
+body .bg-black\/60,
+body .bg-black\/40,
+body .bg-zinc-950,
+body .bg-zinc-950\/95,
+body .bg-zinc-900,
+body .bg-zinc-900\/60,
+body .bg-zinc-800,
+body .bg-neutral-900,
+body .bg-neutral-950,
+body .bg-slate-900,
+body .bg-slate-950,
+body .bg-gray-900,
+body .bg-gray-950,
+body .bg-\[\#030303\],
+body .bg-\[\#0a0a14\],
+body .bg-\[\#070710\],
+body .bg-\[\#0d0d0d\],
+body .bg-\[\#0a0a0a\] {
+  background-color: hsl(var(--card)) !important;
+}
+
+/* translucent white glass -> soft blue-tinted surfaces */
+body .bg-white\/5,
+body .hover\:bg-white\/5:hover,
+body .bg-white\/10,
+body .hover\:bg-white\/10:hover,
+body .bg-white\/20 {
+  background-color: hsl(205 90% 97.5%) !important;
+}
+
+/* hairline borders */
+body .border-white\/5,
+body .border-white\/10,
+body .border-white\/20,
+body .border-white\/25 {
+  border-color: hsl(var(--border)) !important;
+}
+
+/* translucent white text -> readable dark text */
+body .text-white\/90 { color: hsl(224 64% 12%) !important; }
+body .text-white\/85 { color: hsl(224 55% 16%) !important; }
+body .text-white\/80 { color: hsl(223 45% 21%) !important; }
+body .text-white\/75 { color: hsl(222 40% 25%) !important; }
+body .text-white\/70 { color: hsl(221 36% 29%) !important; }
+body .text-white\/65 { color: hsl(220 34% 32%) !important; }
+body .text-white\/60 { color: hsl(220 32% 35%) !important; }
+body .text-white\/55 { color: hsl(220 30% 38%) !important; }
+body .text-white\/50 { color: hsl(220 28% 42%) !important; }
+body .text-white\/45 { color: hsl(220 26% 46%) !important; }
+body .text-white\/40 { color: hsl(220 24% 50%) !important; }
+body .text-white\/35 { color: hsl(220 22% 54%) !important; }
+body .text-white\/20 { color: hsl(220 20% 62%) !important; }
+body .text-white { color: hsl(224 64% 12%) !important; }
+
+
+
+/* Catch-all: any arbitrary near-black background utility (with or without
+   opacity modifier) becomes a light surface. */
+body [class*="bg-[#0"],
+body [class*="bg-[#1"],
+body [class*="bg-[#2"],
+body [class*="bg-zinc-9"],
+body [class*="bg-neutral-9"],
+body [class*="bg-slate-9"],
+body [class*="bg-gray-9"],
+body [class*="bg-black"] {
+  background-color: hsl(var(--card)) !important;
+}
+body [class*="border-white/"] { border-color: hsl(var(--border)) !important; }
+
+/* purple ambient blobs -> blue */
+body [class*="bg-purple-6"], body [class*="bg-purple-5"] { background-color: hsl(226 78% 45% / .14) !important; }
+body [class*="bg-fuchsia-6"] { background-color: hsl(215 80% 45% / .10) !important; }
+body [class*="bg-indigo-6"] { background-color: hsl(224 76% 44% / .12) !important; }
+
+/* Forced-white text utilities (!text-white) -> dark, except on filled surfaces */
+body [class*="text-white"] { color: hsl(224 64% 12%) !important; }
+
+/* keep white only when the element ITSELF (or its direct icon/span child)
+   sits on a filled colored surface */
+[class*="bg-gradient"][class*="text-white"],
+[class*="bg-primary"][class*="text-white"],
+.btn-3d[class*="text-white"],
+[class*="bg-blue-5"][class*="text-white"],
+[class*="bg-blue-6"][class*="text-white"],
+[class*="bg-blue-7"][class*="text-white"],
+[class*="bg-emerald-5"][class*="text-white"],
+[class*="bg-emerald-6"][class*="text-white"],
+[class*="bg-green-5"][class*="text-white"],
+[class*="bg-green-6"][class*="text-white"],
+[class*="bg-red-5"][class*="text-white"],
+[class*="bg-red-6"][class*="text-white"],
+[class*="bg-rose-5"][class*="text-white"],
+[class*="bg-amber-5"][class*="text-white"],
+[class*="bg-orange-5"][class*="text-white"],
+[class*="bg-violet-5"][class*="text-white"],
+[class*="bg-violet-6"][class*="text-white"],
+[class*="bg-purple-5"][class*="text-white"],
+[class*="bg-purple-6"][class*="text-white"],
+[class*="bg-indigo-5"][class*="text-white"],
+[class*="bg-indigo-6"][class*="text-white"],
+.btn-3d > [class*="text-white"] { color: #fff !important; }
+
+/* Translucent tinted surfaces are LIGHT in this theme,
+   so any white-ish text on them (or inside them) must be dark navy. */
+body [class*="bg-primary/"],
+body [class*="bg-primary/"] *,
+body [class*="bg-blue-500/"], body [class*="bg-blue-500/"] *,
+body [class*="bg-blue-600/"], body [class*="bg-blue-600/"] *,
+body [class*="bg-indigo-500/"], body [class*="bg-indigo-500/"] *,
+body [class*="bg-violet-500/"], body [class*="bg-violet-500/"] *,
+body [class*="bg-purple-500/"], body [class*="bg-purple-500/"] * {
+  --tw-text-opacity: 1;
+}
+body [class*="bg-primary/"][class*="text-white"],
+body [class*="bg-primary/"] [class*="text-white"],
+body [class*="bg-blue-500/"][class*="text-white"],
+body [class*="bg-blue-500/"] [class*="text-white"],
+body [class*="bg-blue-600/"][class*="text-white"],
+body [class*="bg-blue-600/"] [class*="text-white"],
+body [class*="bg-indigo-500/"] [class*="text-white"],
+body [class*="bg-violet-500/"] [class*="text-white"],
+body [class*="bg-purple-500/"] [class*="text-white"] {
+  color: hsl(224 64% 12%) !important;
+}
+/* text-primary-foreground is white; only valid on solid fills */
+body [class*="text-primary-foreground"]:not([class*="bg-primary "]):not([class*="bg-gradient"]):not(.btn-3d):not([class$="bg-primary"]) {
+  color: hsl(224 64% 12%) !important;
+}
+body [class*="bg-primary"]:not([class*="bg-primary/"]) [class*="text-primary-foreground"],
+body [class*="bg-gradient"] [class*="text-primary-foreground"],
+body button[class*="bg-primary"]:not([class*="bg-primary/"]),
+body .btn-3d [class*="text-primary-foreground"] {
+  color: #fff !important;
+}
+
+/* white CTA buttons (authored for dark bg) -> primary blue button */
+body a[class*="bg-white"][class*="text-black"],
+body button[class*="bg-white"][class*="text-black"],
+body a[class*="bg-white"][class*="text-primary-foreground"] {
+  background-color: hsl(var(--primary)) !important;
+  color: #fff !important;
+}
+
+/* arbitrary translucent white surfaces bg-white/[0.0x] */
+body [class*="bg-white/["] { background-color: hsl(205 90% 97.5%) !important; }
+
+/* pale accent text -> readable blue/dark tones */
+body [class*="text-purple-2"], body [class*="text-purple-3"],
+body [class*="text-fuchsia-2"], body [class*="text-fuchsia-3"],
+body [class*="text-sky-2"], body [class*="text-sky-3"],
+body [class*="text-indigo-2"], body [class*="text-indigo-3"],
+body [class*="text-blue-2"], body [class*="text-blue-3"] { color: hsl(221 83% 45%) !important; }
+body [class*="text-emerald-2"], body [class*="text-emerald-3"],
+body [class*="text-green-2"], body [class*="text-green-3"] { color: hsl(160 70% 32%) !important; }
+body [class*="text-amber-2"], body [class*="text-amber-3"],
+body [class*="text-yellow-2"], body [class*="text-yellow-3"] { color: hsl(35 90% 35%) !important; }
+body [class*="text-red-3"], body [class*="text-red-2"],
+body [class*="text-rose-3"], body [class*="text-rose-2"] { color: hsl(0 72% 45%) !important; }
+body [class*="text-zinc-4"], body [class*="text-zinc-5"],
+body [class*="text-gray-4"], body [class*="text-slate-4"] { color: hsl(215 20% 45%) !important; }
+
+/* purple/fuchsia tinted surfaces -> blue tint */
+body [class*="bg-purple-5"], body [class*="bg-purple-6"],
+body [class*="bg-fuchsia-5"], body [class*="bg-fuchsia-6"],
+body [class*="bg-violet-5"], body [class*="bg-violet-6"],
+body [class*="bg-indigo-5"], body [class*="bg-indigo-6"] { background-color: hsl(221 83% 53% / .10) !important; }
+body [class*="border-purple-"], body [class*="border-fuchsia-"],
+body [class*="border-violet-"], body [class*="border-indigo-"] { border-color: hsl(221 83% 53% / .22) !important; }
+
+/* heavy dark shadows -> soft */
+body [class*="shadow-[0_-10px_40px"], body [class*="shadow-[0_0_18px"] { box-shadow: 0 4px 20px rgba(15,23,42,.08) !important; }
+
+/* pale neutral text (authored for dark bg) -> readable muted */
+body [class*="text-slate-1"], body [class*="text-slate-2"], body [class*="text-slate-3"],
+body [class*="text-zinc-1"], body [class*="text-zinc-2"], body [class*="text-zinc-3"],
+body [class*="text-gray-1"], body [class*="text-gray-2"], body [class*="text-gray-3"],
+body [class*="text-neutral-1"], body [class*="text-neutral-2"], body [class*="text-neutral-3"] {
+  color: hsl(215 20% 40%) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   CONTRAST PASS — kill the washed-out pale canvas, deep blue ink
+   ════════════════════════════════════════════════════════════════ */
+
+/* pale page canvas -> clean white */
+body [class*="bg-[#f5f9ff]"] { background-color: #ffffff !important; }
+
+/* ambient aurora blobs: barely-there blue instead of pale purple wash */
+body [class*="blur-[140px]"],
+body [class*="blur-[120px]"],
+body [class*="blur-[100px]"] { opacity: .28 !important; }
+body [class*="bg-purple-6"], body [class*="bg-purple-5"] { background-color: hsl(226 78% 45% / .08) !important; }
+body [class*="bg-fuchsia-6"] { background-color: hsl(215 80% 45% / .06) !important; }
+body [class*="bg-indigo-6"] { background-color: hsl(224 76% 44% / .07) !important; }
+
+/* pale gradient text (authored for dark bg) -> deep royal blue */
+body [class*="bg-clip-text"][class*="text-transparent"],
+body .gradient-text {
+  background-image: linear-gradient(135deg, hsl(226 84% 34%), hsl(220 88% 46%)) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+}
+
+/* body copy + muted text: readable navy-grey, not washed grey */
+:root { --muted-foreground: 220 32% 30%; }
+
+/* card surfaces stay crisp against white */
+body .glass-card, body .glass-premium, body .three-d-card {
+  background: #ffffff !important;
+  border-color: hsl(216 32% 86%) !important;
+  box-shadow: 0 6px 22px rgba(15,30,70,.08) !important;
+}
+
+/* translucent glass surfaces: a touch more blue so they read as panels */
+body .bg-white\/5, body .bg-white\/10, body .bg-white\/20,
+body [class*="bg-white/["] { background-color: hsl(205 90% 97.5%) !important; }
+
+/* pale accent text -> stronger blue */
+body [class*="text-purple-2"], body [class*="text-purple-3"],
+body [class*="text-fuchsia-2"], body [class*="text-fuchsia-3"],
+body [class*="text-sky-2"], body [class*="text-sky-3"],
+body [class*="text-indigo-2"], body [class*="text-indigo-3"],
+body [class*="text-blue-2"], body [class*="text-blue-3"] { color: hsl(226 82% 38%) !important; }
+
+/* borders visible on white */
+body [class*="border-white/"] { border-color: hsl(216 32% 86%) !important; }
+
+/* placeholders readable on light inputs */
+body input::placeholder, body textarea::placeholder { color: hsl(220 22% 52%) !important; opacity: 1 !important; }
+body input, body textarea, body select { color: hsl(224 64% 12%) !important; }

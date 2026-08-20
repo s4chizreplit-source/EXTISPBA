@@ -1,0 +1,2 @@
+-- Drop the broad SELECT on promo_codes; redemption already goes through RPC redeem_promo_code (security definer)
+DROP POLICY IF EXISTS "Anyone authenticated can view active codes" ON public.promo_codes;

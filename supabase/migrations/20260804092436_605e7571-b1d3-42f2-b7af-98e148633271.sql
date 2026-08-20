@@ -1,0 +1,1 @@
+DO $$ BEGIN IF NOT has_function_privilege('service_role', 'public.debit_wallet_for_order(uuid,numeric)', 'EXECUTE') THEN RAISE EXCEPTION 'service role cannot debit wallet'; END IF; END $$;

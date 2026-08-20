@@ -1,0 +1,4 @@
+project_id = "xbxcjkypcgriiqsmhcjq"
+
+[functions.ig-image-proxy]
+verify_jwt = false

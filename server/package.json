@@ -1,0 +1,27 @@
+{
+  "name": "@organicsmm/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OrganicSMM Pro self-hosted Express API (VPS only — not used by the Lovable preview)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "migrate": "node src/migrate.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "connect-pg-simple": "^9.0.1",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "express-session": "^1.18.0",
+    "helmet": "^7.1.0",
+    "pg": "^8.12.0",
+    "zod": "^3.23.8"
+  }
+}

@@ -1,0 +1,1 @@
+DO $$ BEGIN IF has_function_privilege('anon', 'public.debit_wallet_for_order(uuid,numeric)', 'EXECUTE') OR has_function_privilege('authenticated', 'public.debit_wallet_for_order(uuid,numeric)', 'EXECUTE') THEN RAISE EXCEPTION 'wallet debit function is exposed'; END IF; END $$;
