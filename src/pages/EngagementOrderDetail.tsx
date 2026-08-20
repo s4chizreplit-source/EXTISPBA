@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrency } from "@/hooks/useCurrency";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -102,22 +101,9 @@ export default function EngagementOrderDetail() {
     queryKey: ['engagement-order-detail', orderNumber],
     queryFn: async () => {
       if (!orderNumber) return null;
-      const { data, error } = await supabase
-        .from('engagement_orders')
-        .select(`
-          *,
-          bundle:engagement_bundles(*),
-          items:engagement_order_items(
-            *,
-            service:services(name, price, min_quantity),
-            runs:organic_run_schedule(*)
-          )
-        `)
-        .eq('order_number', parseInt(orderNumber))
-        .eq('user_id', user?.id)
-        .single();
-      if (error) throw error;
-      return data;
+      const res = await fetch(`/api/engagement-orders/by-number/${orderNumber}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Order not found');
+      return res.json();
     },
     enabled: !!orderNumber && !!user,
     refetchInterval,
@@ -145,40 +131,7 @@ export default function EngagementOrderDetail() {
     }
   }, [order?.status, order?.items?.length]);
 
-  // Real-time subscription — ONLY listen for this order's changes (filtered)
-  useEffect(() => {
-    if (!order?.id || !user) return;
-
-    const channelName = `engagement-order-${order.id}-${Date.now()}`;
-    
-    // Debounce invalidation to prevent cascading refetches
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedInvalidate = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ['engagement-order-detail', orderNumber] });
-      }, 2000); // Wait 2s to batch multiple rapid changes
-    };
-    
-    const channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'engagement_orders',
-          filter: `id=eq.${order.id}`,
-        },
-        () => debouncedInvalidate()
-      )
-      .subscribe();
-
-    return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
-    };
-  }, [order?.id, user, queryClient, orderNumber]);
+  // Polling handles real-time updates — no subscription needed
 
   // Retry failed runs mutation - resets failed runs back to pending
   const retryFailedMutation = useMutation({
@@ -198,24 +151,12 @@ export default function EngagementOrderDetail() {
       
       console.log(`🔄 Retrying ${failedRunIds.length} failed runs...`);
       
-      // Reset all failed runs to pending and clear error messages
-      const { error } = await supabase
-        .from('organic_run_schedule')
-        .update({ 
-          status: 'pending', 
-          error_message: null,
-          provider_order_id: null,
-          provider_response: null,
-          provider_status: null,
-          started_at: null,
-          completed_at: null,
-          retry_count: 0, // Reset retry count
-        })
-        .in('id', failedRunIds);
-      
-      if (error) throw error;
-      
-      return { count: failedRunIds.length };
+      const res = await fetch(`/api/engagement-orders/${order.id}/retry-failed`, {
+        method: 'POST', credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Retry failed');
+      const data = await res.json();
+      return { count: data.count };
     },
     onSuccess: async (data) => {
       toast({
@@ -226,14 +167,7 @@ export default function EngagementOrderDetail() {
       // Refetch order data
       await refetch();
       
-      // Trigger immediate execution
-      setTimeout(async () => {
-        console.log('⚡ Triggering execution for retried runs...');
-        await supabase.functions.invoke('execute-all-runs', {
-          body: { instant: true }
-        });
-        refetch();
-      }, 1000);
+      setTimeout(() => refetch(), 1000);
     },
     onError: (error: Error) => {
       toast({
@@ -247,50 +181,16 @@ export default function EngagementOrderDetail() {
   // Admin: Cancel entire order (order + items + active/pending runs)
   const cancelOrderMutation = useMutation({
     mutationFn: async () => {
-      if (!order?.id || !order?.items) throw new Error('No order data');
-
-      const now = new Date().toISOString();
-      const itemIds = order.items.map((item: any) => item.id);
-
-      // 1. Hard-stop parent order first so backend workers see cancelled state immediately
-      const { error: orderError } = await supabase
-        .from('engagement_orders')
-        .update({ status: 'cancelled' })
-        .eq('id', order.id)
-        .neq('status', 'cancelled');
-      if (orderError) throw orderError;
-
-      // 2. Cancel all active/non-final items
-      const { error: itemsError } = await supabase
-        .from('engagement_order_items')
-        .update({ status: 'cancelled' })
-        .eq('engagement_order_id', order.id)
-        .not('status', 'in', '("completed","cancelled","failed")');
-      if (itemsError) throw itemsError;
-
-      // 3. Cancel all non-final runs so nothing can retry or continue from queue
-      for (const itemId of itemIds) {
-        const { error: runsError } = await supabase
-          .from('organic_run_schedule')
-          .update({
-            status: 'cancelled',
-            error_message: 'Order cancelled by admin',
-            completed_at: now,
-          })
-          .eq('engagement_order_item_id', itemId)
-          .in('status', ['pending', 'failed', 'started']);
-
-        if (runsError) throw runsError;
-      }
+      if (!order?.id) throw new Error('No order data');
+      const res = await fetch(`/api/engagement-orders/${order.id}/status`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      });
+      if (!res.ok) throw new Error('Cancel failed');
     },
     onSuccess: () => {
       toast({ title: "🚫 Order Cancelled", description: "Order and all queued/active runs have been permanently cancelled." });
-      // Fire-and-forget Telegram notification to the order owner
-      try {
-        supabase.functions.invoke('notify-order-status', {
-          body: { engagement_order_id: order?.id, status: 'cancelled' },
-        }).catch(() => {});
-      } catch { /* noop */ }
       refetch();
     },
     onError: (error: Error) => {
@@ -302,18 +202,12 @@ export default function EngagementOrderDetail() {
   const pauseOrderMutation = useMutation({
     mutationFn: async () => {
       if (!order?.id) throw new Error('No order');
-      const { error } = await supabase
-        .from('engagement_orders')
-        .update({ status: 'paused' })
-        .eq('id', order.id);
-      if (error) throw error;
-      
-      // Also pause all non-completed items
-      await supabase
-        .from('engagement_order_items')
-        .update({ status: 'paused' })
-        .eq('engagement_order_id', order.id)
-        .not('status', 'in', '("completed","cancelled","failed")');
+      const res = await fetch(`/api/engagement-orders/${order.id}/status`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'paused' }),
+      });
+      if (!res.ok) throw new Error('Pause failed');
     },
     onSuccess: () => {
       toast({ title: "⏸️ Order Paused", description: "Runs will be skipped until resumed." });
@@ -328,32 +222,12 @@ export default function EngagementOrderDetail() {
   const resumeOrderMutation = useMutation({
     mutationFn: async () => {
       if (!order?.id) throw new Error('No order');
-      const now = new Date().toISOString();
-      
-      // Resume order
-      const { error } = await supabase
-        .from('engagement_orders')
-        .update({ status: 'processing' })
-        .eq('id', order.id);
-      if (error) throw error;
-      
-      // Resume paused items
-      await supabase
-        .from('engagement_order_items')
-        .update({ status: 'processing' })
-        .eq('engagement_order_id', order.id)
-        .eq('status', 'paused');
-      
-      // Cancel overdue pending runs (scheduled during pause)
-      const itemIds = order.items?.map((item: any) => item.id) || [];
-      for (const itemId of itemIds) {
-        await supabase
-          .from('organic_run_schedule')
-          .update({ status: 'cancelled', error_message: 'Skipped — order was paused during this scheduled time', completed_at: now })
-          .eq('engagement_order_item_id', itemId)
-          .eq('status', 'pending')
-          .lt('scheduled_at', now);
-      }
+      const res = await fetch(`/api/engagement-orders/${order.id}/status`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'processing' }),
+      });
+      if (!res.ok) throw new Error('Resume failed');
     },
     onSuccess: () => {
       toast({ title: "▶️ Order Resumed", description: "Future runs will execute as scheduled. Overdue runs were cancelled." });
@@ -367,11 +241,12 @@ export default function EngagementOrderDetail() {
   // Per-type: Pause a specific item
   const pauseItemMutation = useMutation({
     mutationFn: async (itemId: string) => {
-      const { error } = await supabase
-        .from('engagement_order_items')
-        .update({ status: 'paused' })
-        .eq('id', itemId);
-      if (error) throw error;
+      const res = await fetch(`/api/engagement-orders/items/${itemId}/status`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'paused' }),
+      });
+      if (!res.ok) throw new Error('Pause failed');
     },
     onSuccess: () => {
       toast({ title: "⏸️ Type Paused", description: "This engagement type has been paused. Runs will be skipped until resumed." });
@@ -385,20 +260,12 @@ export default function EngagementOrderDetail() {
   // Per-type: Resume a specific item
   const resumeItemMutation = useMutation({
     mutationFn: async (itemId: string) => {
-      const now = new Date().toISOString();
-      // Resume item
-      const { error } = await supabase
-        .from('engagement_order_items')
-        .update({ status: 'processing' })
-        .eq('id', itemId);
-      if (error) throw error;
-      // Cancel overdue pending runs
-      await supabase
-        .from('organic_run_schedule')
-        .update({ status: 'cancelled', error_message: 'Skipped — paused during this scheduled time', completed_at: now })
-        .eq('engagement_order_item_id', itemId)
-        .eq('status', 'pending')
-        .lt('scheduled_at', now);
+      const res = await fetch(`/api/engagement-orders/items/${itemId}/status`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'processing' }),
+      });
+      if (!res.ok) throw new Error('Resume failed');
     },
     onSuccess: () => {
       toast({ title: "▶️ Type Resumed", description: "Future runs will execute. Overdue runs were auto-cancelled." });
@@ -412,36 +279,12 @@ export default function EngagementOrderDetail() {
   // Per-type: Cancel a specific item
   const cancelItemMutation = useMutation({
     mutationFn: async (itemId: string) => {
-      if (!order?.id) throw new Error('No order');
-      const now = new Date().toISOString();
-
-      // Hard-stop item first
-      const { error: itemError } = await supabase
-        .from('engagement_order_items')
-        .update({ status: 'cancelled' })
-        .eq('id', itemId)
-        .neq('status', 'cancelled');
-      if (itemError) throw itemError;
-
-      // Cancel all active/queued runs for this item
-      await supabase
-        .from('organic_run_schedule')
-        .update({ status: 'cancelled', error_message: 'Type cancelled by user', completed_at: now })
-        .eq('engagement_order_item_id', itemId)
-        .in('status', ['pending', 'failed', 'started']);
-
-      // Check if ALL items are now effectively finished/cancelled → cancel parent order
-      const { data: remainingItems } = await supabase
-        .from('engagement_order_items')
-        .select('id, status')
-        .eq('engagement_order_id', order.id);
-      const allCancelled = remainingItems?.every((i: any) => i.status === 'cancelled' || i.status === 'completed' || i.status === 'failed');
-      if (allCancelled) {
-        await supabase
-          .from('engagement_orders')
-          .update({ status: 'cancelled' })
-          .eq('id', order.id);
-      }
+      const res = await fetch(`/api/engagement-orders/items/${itemId}/status`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      });
+      if (!res.ok) throw new Error('Cancel failed');
     },
     onSuccess: () => {
       toast({ title: "🚫 Type Cancelled", description: "All pending runs for this type have been permanently cancelled." });
@@ -458,18 +301,14 @@ export default function EngagementOrderDetail() {
       const currentRun = stats?.allRuns.find((r: any) => r.id === runId);
       if (!currentRun) throw new Error('Run not found');
 
-      const { data, error } = await supabase.rpc('reschedule_organic_run', {
-        p_run_id: runId,
-        p_quantity: quantity,
-        p_scheduled_at: scheduledAt,
+      const res = await fetch(`/api/engagement-orders/runs/${runId}/reschedule`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity, scheduledAt }),
       });
-
-      if (error) throw error;
-
-      return {
-        currentRun,
-        result: data as { success: boolean; extra_charged?: number },
-      };
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Update failed'); }
+      const result = await res.json();
+      return { currentRun, result };
     },
     // OPTIMISTIC UPDATE - Update UI immediately before server confirms
     onMutate: async ({ runId, quantity, scheduledAt }) => {

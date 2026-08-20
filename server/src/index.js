@@ -16,6 +16,7 @@ import serviceRoutes from './routes/services.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import engagementOrderRoutes from './routes/engagement-orders.js';
+import { startCron } from './cron.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -116,6 +117,7 @@ app.use((err, _req, res, _next) => {
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`OrganicSMM Pro API listening on :${PORT}`);
+  startCron();
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
