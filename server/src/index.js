@@ -16,6 +16,7 @@ import serviceRoutes from './routes/services.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import engagementOrderRoutes from './routes/engagement-orders.js';
+import createEngagementOrderRoutes from './routes/create-engagement-order.js';
 import zapupiRoutes from './routes/zapupi.js';
 import bundleRoutes from './routes/bundles.js';
 import userAdminRoutes from './routes/users.js';
@@ -76,6 +77,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/admin/bundles', bundleRoutes);
 app.use('/api/admin/users', userAdminRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/engagement-orders', createEngagementOrderRoutes);
 app.use('/api/engagement-orders', engagementOrderRoutes);
 app.use('/api/zapupi', zapupiRoutes);
 

@@ -102,23 +102,40 @@ router.post(
     const hash = await bcrypt.hash(password, 12);
 
     const user = await withTx(async (client) => {
-      const existing = await client.query('SELECT 1 FROM users WHERE email = $1', [email]);
+      const existing = await client.query('SELECT 1 FROM auth_users WHERE lower(email) = $1', [email]);
       if (existing.rowCount) {
         const err = new Error('Email already registered');
         err.status = 409;
         throw err;
       }
       // First ever account becomes admin so the panel is manageable right after deploy.
-      const count = await client.query('SELECT count(*)::int AS n FROM users');
+      const count = await client.query('SELECT count(*)::int AS n FROM auth_users');
       const role = count.rows[0].n === 0 ? 'admin' : 'user';
 
-      const inserted = await client.query(
-        `INSERT INTO users (email, password_hash, full_name, role)
-         VALUES ($1, $2, $3, $4) RETURNING *`,
-        [email, hash, fullName || '', role]
+      // auth_users uses VPS Supabase schema: encrypted_password + raw_user_meta_data
+      const { rows: [inserted] } = await client.query(
+        `INSERT INTO auth_users (id, email, encrypted_password, raw_user_meta_data)
+         VALUES (gen_random_uuid(), $1, $2, $3)
+         RETURNING id, email, created_at`,
+        [email, hash, JSON.stringify({ full_name: fullName || '', role })]
       );
-      await client.query('INSERT INTO wallets (user_id) VALUES ($1)', [inserted.rows[0].id]);
-      return inserted.rows[0];
+
+      // Role stored in user_roles table (same pattern as VPS users)
+      await client.query(
+        `INSERT INTO user_roles (user_id, role) VALUES ($1, $2)`,
+        [inserted.id, role]
+      );
+
+      // Create profile
+      await client.query(
+        `INSERT INTO profiles (user_id, email, full_name) VALUES ($1, $2, $3)`,
+        [inserted.id, email, fullName || '']
+      );
+
+      // Create wallet
+      await client.query('INSERT INTO wallets (user_id) VALUES ($1)', [inserted.id]);
+
+      return { ...inserted, role };
     });
 
     req.session.userId = user.id;
@@ -164,7 +181,7 @@ router.post(
   authLimiter,
   validate(z.object({ email: z.string().trim().toLowerCase().email() })),
   ah(async (req, res) => {
-    const { rows } = await query('SELECT id FROM users WHERE email = $1', [req.valid.email]);
+    const { rows } = await query('SELECT id FROM auth_users WHERE email = $1', [req.valid.email]);
     let resetUrl;
     if (rows[0]) {
       const token = crypto.randomBytes(32).toString('hex');
@@ -197,7 +214,7 @@ router.post(
       );
       if (!rows[0]) return false;
       await client.query('UPDATE password_resets SET used_at = now() WHERE token = $1', [token]);
-      await client.query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [
+      await client.query('UPDATE auth_users SET encrypted_password = $1 WHERE id = $2', [
         hash,
         rows[0].user_id,
       ]);

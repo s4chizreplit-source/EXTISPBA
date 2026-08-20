@@ -159,7 +159,7 @@ router.get(
              COALESCE(w.balance,0) AS balance,
              COALESCE(w.total_deposited,0) AS total_deposited,
              COALESCE(w.total_spent,0) AS total_spent
-        FROM users u LEFT JOIN wallets w ON w.user_id = u.id
+        FROM auth_users u LEFT JOIN wallets w ON w.user_id = u.id
        ORDER BY u.created_at DESC LIMIT 500
     `);
     res.json({ users: rows });
@@ -173,7 +173,7 @@ router.patch(
   ah(async (req, res) => {
     const { role, isActive } = req.valid;
     const { rows } = await query(
-      `UPDATE users
+      `UPDATE auth_users
           SET role = COALESCE($1, role),
               is_active = COALESCE($2, is_active),
               updated_at = now()
