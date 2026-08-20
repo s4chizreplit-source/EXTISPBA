@@ -151,19 +151,13 @@ export default function EngagementOrder() {
 
   // Fetch ALL active bundles WITH items to know which platforms are available
   const { data: allBundles } = useQuery({
-    queryKey: ['all-bundles-with-items'],
+    queryKey: ['all-bundles-api-v1'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('engagement_bundles')
-        .select(`
-          platform,
-          items:bundle_items(id, service_id)
-        `)
-        .eq('is_active', true);
-      if (error) throw error;
-      return data;
+      const res = await fetch('/api/bundles', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch bundles');
+      return res.json();
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
     placeholderData: keepPreviousData,
   });
 
@@ -191,20 +185,9 @@ export default function EngagementOrder() {
   const { data: bundles, isLoading: bundlesLoading } = useQuery({
     queryKey: ['bundles', platform],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('engagement_bundles')
-        .select(`
-          *,
-          items:bundle_items(
-            *,
-            service:services(id, name, price, min_quantity, max_quantity)
-          )
-        `)
-        .eq('platform', platform)
-        .eq('is_active', true)
-        .order('sort_order');
-      if (error) throw error;
-      return data as (EngagementBundle & { items: (BundleItem & { service: any })[] })[];
+      const res = await fetch(`/api/bundles?platform=${encodeURIComponent(platform)}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch bundles');
+      return res.json() as Promise<(EngagementBundle & { items: (BundleItem & { service: any })[] })[]>;
     },
     enabled: !!platform && availablePlatforms.includes(platform),
     staleTime: 5 * 60 * 1000,

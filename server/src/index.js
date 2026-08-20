@@ -78,6 +78,36 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/engagement-orders', engagementOrderRoutes);
 app.use('/api/zapupi', zapupiRoutes);
 
+// ─── Public (user-facing) bundles endpoint ────────────────────────────────
+app.get('/api/bundles', requireAuth, ah(async (req, res) => {
+  const platform = req.query.platform || null;
+  const { rows: bundles } = await query(
+    `SELECT * FROM engagement_bundles WHERE is_active = true ${platform ? 'AND platform = $1' : ''} ORDER BY sort_order, created_at`,
+    platform ? [platform] : []
+  );
+  if (bundles.length === 0) return res.json([]);
+  const ids = bundles.map(b => b.id);
+  const { rows: items } = await query(
+    `SELECT bi.*,
+            s.id AS svc_id, s.name AS svc_name, s.price AS svc_price,
+            s.min_quantity AS svc_min, s.max_quantity AS svc_max
+       FROM bundle_items bi
+       LEFT JOIN services s ON s.id = bi.service_id
+      WHERE bi.bundle_id = ANY($1::uuid[])
+      ORDER BY bi.sort_order`,
+    [ids]
+  );
+  const byBundle = {};
+  for (const it of items) {
+    if (!byBundle[it.bundle_id]) byBundle[it.bundle_id] = [];
+    byBundle[it.bundle_id].push({
+      ...it,
+      service: it.svc_id ? { id: it.svc_id, name: it.svc_name, price: it.svc_price, min_quantity: it.svc_min, max_quantity: it.svc_max } : null,
+    });
+  }
+  res.json(bundles.map(b => ({ ...b, items: byBundle[b.id] || [] })));
+}));
+
 // Dashboard stats — single DB round-trip
 app.get('/api/dashboard/stats', requireAuth, ah(async (req, res) => {
   const uid = req.session.userId;
