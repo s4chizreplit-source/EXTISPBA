@@ -28,5 +28,9 @@ args = "sh -c 'node server/src/index.js & exec npm run dev'"
 waitForPort = 5000
 
 [[ports]]
+localPort = 3000
+externalPort = 3000
+
+[[ports]]
 localPort = 5000
 externalPort = 80

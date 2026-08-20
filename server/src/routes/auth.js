@@ -113,7 +113,7 @@ router.post(
 router.post(
   '/login',
   authLimiter,
-  validate(credentials.pick({ email: true, password: true })),
+  validate(z.object({ email: z.string().trim().toLowerCase().email().max(255), password: z.string().min(1).max(512) })),
   ah(async (req, res) => {
     const { email, password } = req.valid;
     const user = await importedUserByEmail(email);

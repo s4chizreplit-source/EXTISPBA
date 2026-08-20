@@ -72,7 +72,7 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 const distDir = path.resolve(__dirname, '..', '..', 'dist');
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir, { maxAge: '1h', index: false }));
-  app.get('*', (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+  app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 } else {
   app.get('/', (_req, res) =>
     res.status(200).send('OrganicSMM Pro API is running. Build the frontend to serve the UI.')
