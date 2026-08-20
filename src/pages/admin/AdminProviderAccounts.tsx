@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,12 +61,9 @@ export default function AdminProviderAccounts() {
   const { data: providers } = useQuery({
     queryKey: ["providers"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("providers")
-        .select("id, name, api_url")
-        .eq("is_active", true);
-      if (error) throw error;
-      return data as Provider[];
+      const res = await fetch("/api/admin/providers", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load providers");
+      return res.json() as Promise<Provider[]>;
     },
   });
 
@@ -75,31 +71,22 @@ export default function AdminProviderAccounts() {
   const { data: accounts, isLoading } = useQuery({
     queryKey: ["provider-accounts"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("provider_accounts")
-        .select("*")
-        .order("provider_id", { ascending: true })
-        .order("priority", { ascending: true });
-      if (error) throw error;
-      return data as ProviderAccount[];
+      const res = await fetch("/api/admin/provider-accounts", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load provider accounts");
+      return res.json() as Promise<ProviderAccount[]>;
     },
   });
 
-  // Live balance check for one account (never disables the account —
-  // the health check only records status; disabling stays manual).
+  // Live balance check for one account
   const checkBalance = async (account: ProviderAccount) => {
     setCheckingId(account.id);
     try {
-      const { data, error } = await supabase.functions.invoke("check-provider-balance", {
-        body: { account_id: account.id, source: "manual" },
+      const res = await fetch(`/api/admin/provider-accounts/${account.id}/check-balance`, {
+        method: "POST", credentials: "include",
       });
-      if (error) throw error;
-      const result = (data as any)?.results?.[0];
-      if (result?.error) {
-        toast.error(`${account.name}: ${result.error}`);
-      } else {
-        toast.success(`${account.name}: ${result?.balance ?? "?"} ${result?.currency ?? ""}`);
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Balance check failed");
+      toast.success(`${account.name}: ${data.balance} ${data.currency}`);
       await queryClient.invalidateQueries({ queryKey: ["provider-accounts"] });
     } catch (e: any) {
       toast.error(e.message || "Balance check failed");
@@ -113,36 +100,22 @@ export default function AdminProviderAccounts() {
   // Create/Update mutation
   const saveMutation = useMutation({
     mutationFn: async (data: typeof formData & { id?: string }) => {
-      if (data.id) {
-        // Update
-        const { error } = await supabase
-          .from("provider_accounts")
-          .update({
-            provider_id: data.provider_id,
-            name: data.name,
-            api_key: data.api_key,
-            api_url: data.api_url,
-            priority: data.priority,
-            is_active: data.is_active,
-            delivery_multiplier: data.delivery_multiplier,
-          })
-          .eq("id", data.id);
-        if (error) throw error;
-      } else {
-        // Create
-        const { error } = await supabase
-          .from("provider_accounts")
-          .insert({
-            provider_id: data.provider_id,
-            name: data.name,
-            api_key: data.api_key,
-            api_url: data.api_url,
-            priority: data.priority,
-            is_active: data.is_active,
-            delivery_multiplier: data.delivery_multiplier,
-          });
-        if (error) throw error;
-      }
+      const url = data.id ? `/api/admin/provider-accounts/${data.id}` : "/api/admin/provider-accounts";
+      const res = await fetch(url, {
+        method: data.id ? "PATCH" : "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider_id: data.provider_id,
+          name: data.name,
+          api_key: data.api_key,
+          api_url: data.api_url,
+          priority: data.priority,
+          is_active: data.is_active,
+          delivery_multiplier: data.delivery_multiplier,
+        }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Failed to save"); }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["provider-accounts"] });
@@ -158,58 +131,10 @@ export default function AdminProviderAccounts() {
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const account = accounts?.find(a => a.id === id);
-      if (!account) throw new Error("Account not found");
-
-      // Nullify references in organic_run_schedule
-      const { error: refError } = await supabase
-        .from("organic_run_schedule")
-        .update({ provider_account_id: null })
-        .eq("provider_account_id", id);
-      if (refError) throw refError;
-
-      // Delete service_provider_mapping for this account
-      const { error: mapError } = await supabase
-        .from("service_provider_mapping")
-        .delete()
-        .eq("provider_account_id", id);
-      if (mapError) throw mapError;
-
-      // Delete the provider account
-      const { error } = await supabase
-        .from("provider_accounts")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
-
-      // Check if any other accounts remain for this provider_id
-      const { data: remainingAccounts } = await supabase
-        .from("provider_accounts")
-        .select("id")
-        .eq("provider_id", account.provider_id)
-        .limit(1);
-
-      // If no accounts left, clean up all services of this provider
-      if (!remainingAccounts?.length) {
-        const { data: services } = await supabase
-          .from("services")
-          .select("id")
-          .eq("provider_id", account.provider_id);
-
-        if (services?.length) {
-          const serviceIds = services.map(s => s.id);
-          // Batch nullify all FK references
-          await Promise.all([
-            ...serviceIds.map(sid => supabase.from("bundle_items").update({ service_id: null }).eq("service_id", sid)),
-            ...serviceIds.map(sid => supabase.from("engagement_order_items").update({ service_id: null }).eq("service_id", sid)),
-            ...serviceIds.map(sid => supabase.from("service_provider_mapping").delete().eq("service_id", sid)),
-          ]);
-          // Delete all services
-          await supabase.from("services").delete().eq("provider_id", account.provider_id);
-        }
-        // Delete the provider itself
-        await supabase.from("providers").delete().eq("id", account.provider_id);
-      }
+      const res = await fetch(`/api/admin/provider-accounts/${id}`, {
+        method: "DELETE", credentials: "include",
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Failed to delete"); }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["provider-accounts"] });
@@ -224,11 +149,12 @@ export default function AdminProviderAccounts() {
   // Toggle active status
   const toggleMutation = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
-      const { error } = await supabase
-        .from("provider_accounts")
-        .update({ is_active })
-        .eq("id", id);
-      if (error) throw error;
+      const res = await fetch(`/api/admin/provider-accounts/${id}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active }),
+      });
+      if (!res.ok) throw new Error("Failed to toggle");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["provider-accounts"] });

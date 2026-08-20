@@ -174,8 +174,9 @@ router.get(
   ah(async (req, res) => {
     const { status, limit } = req.valid;
     const { rows } = await query(
-      `SELECT o.*, s.name AS service_name, s.platform
-         FROM orders o JOIN services s ON s.id = o.service_id
+      `SELECT o.id, o.order_number, o.status, o.price, o.link, o.quantity, o.created_at,
+              s.name AS service_name, s.platform AS service_category
+         FROM orders o LEFT JOIN services s ON s.id = o.service_id
         WHERE o.user_id = $1 AND ($2 = 'all' OR o.status = $2)
         ORDER BY o.created_at DESC LIMIT $3`,
       [req.session.userId, status, limit]

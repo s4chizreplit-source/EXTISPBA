@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "postgresql-16"]
+modules = ["nodejs-24", "postgresql-16", "python-base-3.13"]
 [nix]
 channel = "stable-25_05"
 packages = ["unzip"]
@@ -34,3 +34,8 @@ externalPort = 3000
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["sh", "-c", "node server/src/index.js"]
+build = ["npm", "run", "build"]

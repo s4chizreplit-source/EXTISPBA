@@ -9,11 +9,13 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { pool, query } from './db.js';
+import { requireAuth, ah } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
 import walletRoutes from './routes/wallet.js';
 import serviceRoutes from './routes/services.js';
 import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
+import engagementOrderRoutes from './routes/engagement-orders.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -65,6 +67,32 @@ app.use('/api/wallet', walletRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/engagement-orders', engagementOrderRoutes);
+
+// Dashboard stats — single DB round-trip
+app.get('/api/dashboard/stats', requireAuth, ah(async (req, res) => {
+  const uid = req.session.userId;
+  const { rows } = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE src = 'order') AS total_orders,
+       COUNT(*) FILTER (WHERE src = 'order' AND status = 'completed') AS completed_orders,
+       COUNT(*) FILTER (WHERE src = 'order' AND status IN ('pending','processing')) AS active_orders,
+       COALESCE(SUM(price) FILTER (WHERE src = 'order'), 0) AS total_spent
+     FROM (
+       SELECT 'order' AS src, status, price::numeric AS price FROM orders WHERE user_id = $1
+       UNION ALL
+       SELECT 'order', status, total_price::numeric FROM engagement_orders WHERE user_id = $1
+     ) t`,
+    [uid]
+  );
+  const r = rows[0];
+  res.json({
+    totalOrders:     Number(r.total_orders),
+    completedOrders: Number(r.completed_orders),
+    activeOrders:    Number(r.active_orders),
+    totalSpent:      Number(r.total_spent),
+  });
+}));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

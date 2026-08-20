@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
 import { useCurrency } from '@/hooks/useCurrency';
-import { supabase } from '@/integrations/supabase/client';
 import { Wallet, ShoppingCart, TrendingUp, Activity, Sparkles, Package, ChevronRight, Zap, Eye, Heart, MessageCircle, BarChart3, ArrowUpRight } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -17,8 +16,10 @@ export default function Dashboard() {
   const { data: recentOrders } = useQuery({
     queryKey: ['recent-orders', user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from('orders').select('id, status, price, link, created_at, service:services(name, category)').eq('user_id', user?.id).order('created_at', { ascending: false }).limit(5);
-      return data || [];
+      const res = await fetch('/api/orders?limit=5', { credentials: 'include' });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.orders || []);
     },
     enabled: !!user?.id,
     staleTime: 30000,
@@ -28,8 +29,10 @@ export default function Dashboard() {
   const { data: engagementOrders } = useQuery({
     queryKey: ['recent-engagement-orders', user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from('engagement_orders').select('id, order_number, status, total_price, link, created_at, base_quantity, items:engagement_order_items(engagement_type, quantity, status)').eq('user_id', user?.id).order('created_at', { ascending: false }).limit(5);
-      return data || [];
+      const res = await fetch('/api/engagement-orders', { credentials: 'include' });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || []).slice(0, 5);
     },
     enabled: !!user?.id,
     staleTime: 30000,
@@ -39,13 +42,9 @@ export default function Dashboard() {
   const { data: stats } = useQuery({
     queryKey: ['dashboard-stats', user?.id],
     queryFn: async () => {
-      const { data: orders } = await supabase.from('orders').select('status, price').eq('user_id', user?.id).limit(1000);
-      const { data: engOrders } = await supabase.from('engagement_orders').select('status, total_price').eq('user_id', user?.id).limit(1000);
-      const totalOrders = (orders?.length || 0) + (engOrders?.length || 0);
-      const completedOrders = (orders?.filter(o => o.status === 'completed').length || 0) + (engOrders?.filter(o => o.status === 'completed').length || 0);
-      const activeOrders = (orders?.filter(o => ['processing','pending'].includes(o.status || '')).length || 0) + (engOrders?.filter(o => ['processing','pending'].includes(o.status || '')).length || 0);
-      const totalSpent = (orders?.reduce((s, o) => s + Number(o.price), 0) || 0) + (engOrders?.reduce((s, o) => s + Number(o.total_price), 0) || 0);
-      return { totalOrders, completedOrders, activeOrders, totalSpent };
+      const res = await fetch('/api/dashboard/stats', { credentials: 'include' });
+      if (!res.ok) return { totalOrders: 0, completedOrders: 0, activeOrders: 0, totalSpent: 0 };
+      return res.json();
     },
     enabled: !!user?.id,
     staleTime: 60000,

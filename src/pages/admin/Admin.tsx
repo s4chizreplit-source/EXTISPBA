@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { QueueHealthWidget } from '@/components/admin/QueueHealthWidget';
 import { CronStatusPanel } from '@/components/admin/CronStatusPanel';
@@ -48,9 +47,9 @@ export default function Admin() {
   const { data: dashboardStats, isLoading: statsLoading } = useQuery({
     queryKey: ['admin-dashboard-stats'],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('get_admin_dashboard_stats' as any);
-      if (error) throw error;
-      return data as any;
+      const res = await fetch('/api/admin/stats', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load stats');
+      return res.json();
     },
     refetchInterval: 15000,
     refetchOnWindowFocus: true,
@@ -70,14 +69,12 @@ export default function Admin() {
   // Save markup mutation
   const saveMarkupMutation = useMutation({
     mutationFn: async (percent: number) => {
-      // Update all rows (only 1 row exists)
-      const { data: existing } = await supabase.from('platform_settings').select('id').limit(1).maybeSingle();
-      if (!existing) throw new Error('No platform settings found');
-      const { error } = await supabase
-        .from('platform_settings')
-        .update({ global_markup_percent: percent, updated_at: new Date().toISOString() })
-        .eq('id', existing.id);
-      if (error) throw error;
+      const res = await fetch('/api/admin/platform-settings', {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ global_markup_percent: percent }),
+      });
+      if (!res.ok) throw new Error('Failed to update markup');
     },
     onSuccess: () => {
       toast.success('Global markup updated successfully!');
@@ -93,13 +90,12 @@ export default function Admin() {
   // Maintenance mode toggle mutation
   const toggleMaintenanceMutation = useMutation({
     mutationFn: async (enabled: boolean) => {
-      const { data: existing } = await supabase.from('platform_settings').select('id').limit(1).maybeSingle();
-      if (!existing) throw new Error('No platform settings found');
-      const { error } = await supabase
-        .from('platform_settings')
-        .update({ maintenance_mode: enabled, updated_at: new Date().toISOString() } as any)
-        .eq('id', existing.id);
-      if (error) throw error;
+      const res = await fetch('/api/admin/platform-settings', {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maintenance_mode: enabled }),
+      });
+      if (!res.ok) throw new Error('Failed to update maintenance mode');
     },
     onSuccess: (_, enabled) => {
       toast.success(enabled ? 'Maintenance mode enabled' : 'Maintenance mode disabled');

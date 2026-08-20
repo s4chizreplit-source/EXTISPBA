@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrency } from "@/hooks/useCurrency";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -68,21 +67,9 @@ export default function EngagementOrders() {
     queryKey: ['engagement-orders', user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data, error } = await supabase
-        .from('engagement_orders')
-        .select(`
-          id, order_number, status, total_price, link, base_quantity, created_at, updated_at, is_organic_mode,
-          items:engagement_order_items(
-            id, engagement_type, quantity, status,
-            runs:organic_run_schedule(id, status, quantity_to_send, scheduled_at, run_number, provider_status, provider_remains, provider_start_count, provider_charge, error_message)
-          )
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        // Imported users can have well over 100 historical orders.
-        .limit(1000);
-      if (error) throw error;
-      return data;
+      const res = await fetch('/api/engagement-orders', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load engagement orders');
+      return res.json();
     },
     enabled: !!user,
     staleTime: 15000, // Cache for 15s

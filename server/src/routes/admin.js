@@ -16,22 +16,139 @@ router.get(
   ah(async (_req, res) => {
     const { rows } = await query(`
       SELECT
-        (SELECT count(*)::int FROM users)                                        AS users,
-        (SELECT count(*)::int FROM orders)                                       AS orders,
-        (SELECT count(*)::int FROM orders WHERE status IN ('pending','processing')) AS open_orders,
-        (SELECT count(*)::int FROM services WHERE is_active)                     AS services,
-        (SELECT COALESCE(sum(balance),0)  FROM wallets)                          AS wallet_total,
-        (SELECT COALESCE(sum(charge),0)   FROM orders WHERE status <> 'failed')  AS revenue
+        (SELECT count(*)::int FROM auth.users)                                                      AS user_count,
+        (SELECT count(*)::int FROM orders)                                                          AS total_orders,
+        (SELECT count(*)::int FROM orders WHERE status IN ('pending','processing'))                 AS open_orders,
+        (SELECT count(*)::int FROM services WHERE is_active)                                        AS service_count,
+        (SELECT COALESCE(sum(balance),0)            FROM wallets)                                   AS total_wallet_balance,
+        (SELECT COALESCE(sum(price),0)              FROM orders WHERE status <> 'failed')           AS total_revenue,
+        (SELECT COALESCE(sum(amount),0)             FROM transactions WHERE type='deposit' AND status='completed') AS total_deposits,
+        (SELECT count(*)::int                       FROM transactions WHERE type='deposit' AND status='completed') AS deposits_count,
+        (SELECT COALESCE(sum(amount),0)             FROM transactions WHERE type='deposit' AND status='completed' AND created_at >= CURRENT_DATE) AS deposits_today,
+        (SELECT global_markup_percent               FROM platform_settings WHERE id='global')       AS markup,
+        (SELECT maintenance_mode                    FROM platform_settings WHERE id='global')       AS maintenance_mode
     `);
     let provider = null;
-    try {
-      provider = await fetchProviderBalance();
-    } catch {
-      provider = null;
-    }
+    try { provider = await fetchProviderBalance(); } catch { provider = null; }
     res.json({ ...rows[0], providerConfigured, providerBalance: provider });
   })
 );
+
+// Platform settings
+router.get('/platform-settings', ah(async (_req, res) => {
+  const { rows } = await query(`SELECT * FROM platform_settings WHERE id='global'`);
+  res.json(rows[0] || { id: 'global', global_markup_percent: 0, maintenance_mode: false });
+}));
+
+router.patch('/platform-settings', ah(async (req, res) => {
+  const { global_markup_percent, maintenance_mode } = req.body;
+  const { rows } = await query(
+    `UPDATE platform_settings
+        SET global_markup_percent = COALESCE($1, global_markup_percent),
+            maintenance_mode      = COALESCE($2, maintenance_mode),
+            updated_at            = now()
+      WHERE id = 'global' RETURNING *`,
+    [global_markup_percent ?? null, maintenance_mode ?? null]
+  );
+  res.json(rows[0]);
+}));
+
+// Providers list (for dropdown)
+router.get('/providers', ah(async (_req, res) => {
+  const { rows } = await query(`SELECT id, name, api_url FROM providers WHERE is_active = true ORDER BY name`);
+  res.json(rows);
+}));
+
+// Provider accounts CRUD
+router.get('/provider-accounts', ah(async (_req, res) => {
+  const { rows } = await query(
+    `SELECT * FROM provider_accounts ORDER BY provider_id, priority ASC`
+  );
+  res.json(rows);
+}));
+
+router.post('/provider-accounts', ah(async (req, res) => {
+  const { provider_id, name, api_key, api_url, priority, is_active, delivery_multiplier } = req.body;
+  const { rows } = await query(
+    `INSERT INTO provider_accounts (provider_id, name, api_key, api_url, priority, is_active, delivery_multiplier)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [provider_id, name, api_key, api_url, priority ?? 1, is_active ?? true, delivery_multiplier ?? 1]
+  );
+  res.status(201).json(rows[0]);
+}));
+
+router.patch('/provider-accounts/:id', ah(async (req, res) => {
+  const { name, api_key, api_url, priority, is_active, delivery_multiplier } = req.body;
+  const { rows } = await query(
+    `UPDATE provider_accounts
+        SET name               = COALESCE($1, name),
+            api_key            = COALESCE($2, api_key),
+            api_url            = COALESCE($3, api_url),
+            priority           = COALESCE($4, priority),
+            is_active          = COALESCE($5, is_active),
+            delivery_multiplier= COALESCE($6, delivery_multiplier),
+            updated_at         = now()
+      WHERE id = $7 RETURNING *`,
+    [name??null, api_key??null, api_url??null, priority??null, is_active??null, delivery_multiplier??null, req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+  res.json(rows[0]);
+}));
+
+router.delete('/provider-accounts/:id', ah(async (req, res) => {
+  const id = req.params.id;
+  await withTx(async (client) => {
+    const acct = await client.query(`SELECT * FROM provider_accounts WHERE id=$1`, [id]);
+    if (!acct.rows[0]) { const e = new Error('Not found'); e.status = 404; throw e; }
+    const { provider_id } = acct.rows[0];
+
+    // Nullify FK refs
+    await client.query(`UPDATE organic_run_schedule SET provider_account_id=NULL WHERE provider_account_id=$1`, [id]);
+    await client.query(`DELETE FROM service_provider_mapping WHERE provider_account_id=$1`, [id]);
+    await client.query(`DELETE FROM provider_accounts WHERE id=$1`, [id]);
+
+    // If no accounts remain for this provider, clean up services + provider
+    const rem = await client.query(`SELECT id FROM provider_accounts WHERE provider_id=$1 LIMIT 1`, [provider_id]);
+    if (!rem.rows.length) {
+      const svcs = await client.query(`SELECT id FROM services WHERE provider_id=$1`, [provider_id]);
+      if (svcs.rows.length) {
+        const ids = svcs.rows.map(r => r.id);
+        await client.query(`UPDATE bundle_items SET service_id=NULL WHERE service_id=ANY($1)`, [ids]);
+        await client.query(`UPDATE engagement_order_items SET service_id=NULL WHERE service_id=ANY($1)`, [ids]);
+        await client.query(`DELETE FROM service_provider_mapping WHERE service_id=ANY($1)`, [ids]);
+        await client.query(`DELETE FROM services WHERE id=ANY($1)`, [ids]);
+      }
+      await client.query(`DELETE FROM providers WHERE id=$1`, [provider_id]);
+    }
+  });
+  res.json({ ok: true });
+}));
+
+// Balance check for one provider account
+router.post('/provider-accounts/:id/check-balance', ah(async (req, res) => {
+  const { rows } = await query(`SELECT * FROM provider_accounts WHERE id=$1`, [req.params.id]);
+  const acct = rows[0];
+  if (!acct) return res.status(404).json({ error: 'Not found' });
+
+  try {
+    const body = new URLSearchParams({ key: acct.api_key, action: 'balance' });
+    const r = await fetch(acct.api_url, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(), signal: AbortSignal.timeout(15000),
+    });
+    const data = await r.json();
+    const balance = Number(data.balance ?? data.funds ?? 0);
+    const currency = data.currency ?? 'USD';
+    await query(
+      `UPDATE provider_accounts SET balance=$1, balance_currency=$2, balance_checked_at=now(), last_balance_error=NULL WHERE id=$3`,
+      [balance, currency, acct.id]
+    );
+    res.json({ balance, currency });
+  } catch (e) {
+    await query(`UPDATE provider_accounts SET last_balance_error=$1, balance_checked_at=now() WHERE id=$2`, [e.message, acct.id]);
+    res.status(502).json({ error: e.message });
+  }
+}));
 
 router.get(
   '/users',
@@ -204,10 +321,10 @@ router.get(
   ),
   ah(async (req, res) => {
     const { rows } = await query(
-      `SELECT o.*, u.email, s.name AS service_name, s.platform
+      `SELECT o.*, au.email, s.name AS service_name, s.platform
          FROM orders o
-         JOIN users u ON u.id = o.user_id
-         JOIN services s ON s.id = o.service_id
+         JOIN auth.users au ON au.id = o.user_id
+         LEFT JOIN services s ON s.id = o.service_id
         WHERE ($1 = 'all' OR o.status = $1)
         ORDER BY o.created_at DESC LIMIT $2`,
       [req.valid.status, req.valid.limit]
