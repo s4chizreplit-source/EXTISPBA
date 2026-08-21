@@ -466,3 +466,15 @@ body [class*="border-white/"] { border-color: hsl(216 32% 86%) !important; }
 /* placeholders readable on light inputs */
 body input::placeholder, body textarea::placeholder { color: hsl(220 22% 52%) !important; opacity: 1 !important; }
 body input, body textarea, body select { color: hsl(224 64% 12%) !important; }
+
+/* Wallet's filled sky-blue surfaces need high-contrast text. The general
+   light-theme remap intentionally darkens .text-white elsewhere, so keep this
+   exception narrowly scoped to the wallet's actual colored controls. */
+.wallet-sky-theme .wallet-on-gradient,
+.wallet-sky-theme .wallet-on-gradient * {
+  color: #fff !important;
+}
+
+.wallet-sky-theme .wallet-on-gradient .wallet-soft-white {
+  color: #e0f2fe !important;
+}

@@ -89,7 +89,7 @@ export default function Wallet() {
       <style>{`
         @keyframes vault-pulse { 0%,100%{opacity:.6} 50%{opacity:1} }
       `}</style>
-      <div className="min-h-full bg-[radial-gradient(circle_at_top_left,_#d9f4ff_0%,_#f7fbff_42%,_#e9f2ff_100%)] -mx-4 -my-6 md:-mx-6 md:-my-8 px-4 py-6 md:px-8 md:py-10 relative overflow-hidden">
+      <div className="wallet-sky-theme min-h-full bg-[radial-gradient(circle_at_top_left,_#d9f4ff_0%,_#f7fbff_42%,_#e9f2ff_100%)] -mx-4 -my-6 md:-mx-6 md:-my-8 px-4 py-6 md:px-8 md:py-10 relative overflow-hidden">
         {/* Soft sky-blue ambient glow */}
         <div aria-hidden className="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[700px] h-[440px] bg-sky-300/35 blur-[120px] rounded-full" />
         <div aria-hidden className="pointer-events-none absolute top-1/2 -right-40 w-[360px] h-[360px] bg-blue-300/20 blur-[110px] rounded-full" />
@@ -111,7 +111,7 @@ export default function Wallet() {
           </div>
 
           {/* Compact Balance Card — landing page style */}
-          <div className="relative overflow-hidden rounded-2xl border border-sky-300/60 bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700 p-5 shadow-[0_18px_45px_-20px_rgba(37,99,235,0.75)]">
+          <div className="wallet-on-gradient relative overflow-hidden rounded-2xl border border-sky-300/60 bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700 p-5 shadow-[0_18px_45px_-20px_rgba(37,99,235,0.75)]">
             <div aria-hidden className="absolute -top-20 right-6 h-40 w-40 rounded-full bg-cyan-200/25 blur-2xl" />
             <div aria-hidden className="absolute -bottom-20 left-1/3 h-36 w-36 rounded-full bg-indigo-300/25 blur-2xl" />
             <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -119,11 +119,11 @@ export default function Wallet() {
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <span className="h-1 w-1 rounded-full bg-emerald-400" style={{ animation: 'vault-pulse 1.8s ease-in-out infinite' }} />
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-100">Balance</p>
+                  <p className="wallet-soft-white text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-100">Balance</p>
                 </div>
                 <div className="flex items-baseline gap-2">
                   <h2 className="text-[28px] leading-none font-bold tracking-tight text-white">{formatPrice(wallet?.balance || 0)}</h2>
-                  <span className="text-[10px] font-medium text-sky-100 uppercase tracking-widest">USD</span>
+                  <span className="wallet-soft-white text-[10px] font-medium text-sky-100 uppercase tracking-widest">USD</span>
                 </div>
               </div>
 
@@ -132,14 +132,14 @@ export default function Wallet() {
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/15 border border-white/25 backdrop-blur-sm">
                   <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-200" />
                   <div className="leading-tight">
-                    <p className="text-[8px] font-semibold uppercase tracking-wider text-sky-100">In</p>
+                    <p className="wallet-soft-white text-[8px] font-semibold uppercase tracking-wider text-sky-100">In</p>
                     <p className="text-[11px] font-semibold text-white">{formatPrice(wallet?.total_deposited || 0)}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/15 border border-white/25 backdrop-blur-sm">
                   <ArrowUpRight className="w-3.5 h-3.5 text-rose-200" />
                   <div className="leading-tight">
-                    <p className="text-[8px] font-semibold uppercase tracking-wider text-sky-100">Out</p>
+                    <p className="wallet-soft-white text-[8px] font-semibold uppercase tracking-wider text-sky-100">Out</p>
                     <p className="text-[11px] font-semibold text-white">{formatPrice(wallet?.total_spent || 0)}</p>
                   </div>
                 </div>
@@ -163,7 +163,7 @@ export default function Wallet() {
                 className={
                   'relative flex items-center justify-center gap-2 py-2.5 rounded-lg font-medium text-sm transition-all ' +
                   (method === 'upi'
-                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-[0_6px_14px_rgba(37,99,235,0.25)]'
+                    ? 'wallet-on-gradient bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-[0_6px_14px_rgba(37,99,235,0.25)]'
                     : 'text-slate-600 hover:text-sky-700 hover:bg-sky-50')
                 }
               >
@@ -178,7 +178,7 @@ export default function Wallet() {
                 className={
                   'flex items-center justify-center gap-2 py-2.5 rounded-lg font-medium text-sm transition-all ' +
                   (method === 'crypto'
-                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-[0_6px_14px_rgba(37,99,235,0.25)]'
+                    ? 'wallet-on-gradient bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-[0_6px_14px_rgba(37,99,235,0.25)]'
                     : 'text-slate-600 hover:text-sky-700 hover:bg-sky-50')
                 }
               >

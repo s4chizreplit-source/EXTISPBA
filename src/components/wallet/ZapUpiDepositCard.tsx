@@ -98,7 +98,7 @@ export default function ZapUpiDepositCard() {
       <div aria-hidden className="pointer-events-none absolute -top-24 -right-16 h-48 w-48 rounded-full bg-cyan-300/30 blur-3xl" />
       <div className="relative flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 border border-sky-400 flex items-center justify-center shadow-md">
+          <div className="wallet-on-gradient w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 border border-sky-400 flex items-center justify-center shadow-md">
             <Zap className="w-4 h-4 text-white" fill="white" />
           </div>
           <div>
@@ -140,7 +140,7 @@ export default function ZapUpiDepositCard() {
                 className={
                   'py-2.5 rounded-lg text-xs font-semibold transition-all border ' +
                   (active
-                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 border-blue-500 text-white shadow-sm'
+                    ? 'wallet-on-gradient bg-gradient-to-r from-sky-500 to-blue-600 border-blue-500 text-white shadow-sm'
                     : 'bg-white/75 border-sky-200 text-slate-600 hover:bg-sky-100 hover:border-sky-300 hover:text-sky-800')
                 }
               >
@@ -153,7 +153,7 @@ export default function ZapUpiDepositCard() {
         <button
           onClick={handlePay}
           disabled={loading || polling}
-          className="relative w-full py-3.5 rounded-xl font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-60 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 shadow-[0_12px_26px_rgba(37,99,235,0.35)]"
+          className="wallet-on-gradient relative w-full py-3.5 rounded-xl font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-60 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 shadow-[0_12px_26px_rgba(37,99,235,0.35)]"
         >
           {loading ? (<><Loader2 className="w-4 h-4 animate-spin" /> <span>Opening UPI…</span></>)
             : polling ? (<><Loader2 className="w-4 h-4 animate-spin" /> <span>Verifying…</span></>)
