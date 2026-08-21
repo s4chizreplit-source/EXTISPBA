@@ -97,6 +97,7 @@ export default function AdminOxapayLog() {
                 <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All sources</SelectItem>
+                  <SelectItem value="checkout">Checkout</SelectItem>
                   <SelectItem value="webhook">Webhook</SelectItem>
                   <SelectItem value="poller">Poller</SelectItem>
                 </SelectContent>

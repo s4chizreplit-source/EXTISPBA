@@ -103,7 +103,9 @@ router.post('/create-order', requireAuth, ah(async (req, res) => {
   );
 
   // Determine origin for redirect URLs
-  const origin = (req.headers.origin || req.headers.referer || 'https://extipspanel.pro').replace(/\/$/, '');
+  const configuredOrigin = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+  const origin = configuredOrigin || (req.headers.origin || req.headers.referer || '').replace(/\/$/, '');
+  if (!origin) return res.status(503).json({ error: 'Public application URL is not configured' });
   const webhookUrl = `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : origin}/api/zapupi/webhook`;
 
   const payload = {

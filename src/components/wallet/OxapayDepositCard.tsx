@@ -45,15 +45,19 @@ export default function OxapayDepositCard() {
       if (!mountedRef.current) { toast.dismiss(`ox-${orderId}`); return; }
       try {
         const _res = await fetch('/api/oxapay/sync-deposit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_id: orderId }) });
-        const data = _res.ok ? await _res.json() : null;
+        const data = await _res.json().catch(() => null);
         if (!mountedRef.current) { toast.dismiss(`ox-${orderId}`); return; }
+        if (!_res.ok && [400, 401, 403, 404].includes(_res.status)) {
+          toast.error(data?.error || 'Could not verify this payment.', { id: `ox-${orderId}` });
+          clearParams(); setPolling(false); return;
+        }
         if (data?.credited || data?.status === 'success') {
           toast.success('🎉 Wallet credited!', { id: `ox-${orderId}` });
           queryClient.invalidateQueries({ queryKey: ['wallet'] });
           queryClient.invalidateQueries({ queryKey: ['transactions'] });
           clearParams(); setPolling(false); return;
         }
-        if (data?.status === 'failed') { toast.error('Payment expired.', { id: `ox-${orderId}` }); clearParams(); setPolling(false); return; }
+        if (data?.status === 'failed') { toast.error(data?.error || 'Payment expired or failed.', { id: `ox-${orderId}` }); clearParams(); setPolling(false); return; }
       } catch (e) { console.error('sync error', e); }
       await new Promise((r) => setTimeout(r, INTERVAL));
     }

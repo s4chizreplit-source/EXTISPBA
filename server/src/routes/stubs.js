@@ -257,13 +257,4 @@ router.post('/mass-orders/batch-items/bulk', requireAuth, ah(async (req, res) =>
   } catch { res.json(items.map(it => ({ ...it, id: null }))); }
 }));
 
-// ── Oxapay payment stubs ──────────────────────────────────────────────────────
-router.post('/oxapay/create-wallet-topup', requireAuth, (_req, res) => {
-  res.status(501).json({ error: 'Crypto payments are temporarily unavailable. Please use ZapUPI to add funds.' });
-});
-
-router.post('/oxapay/sync-deposit', requireAuth, (_req, res) => {
-  res.status(501).json({ error: 'Crypto payment sync unavailable.' });
-});
-
 export default router;

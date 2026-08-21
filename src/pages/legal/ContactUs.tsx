@@ -33,8 +33,8 @@ export default function ContactUs() {
                 </div>
                 <h3 className="font-semibold">Email Support</h3>
               </div>
-              <a href="mailto:support@extipspanel.pro" className="text-sm text-orange-500 hover:underline break-all">
-                support@extipspanel.pro
+              <a href="mailto:support@extipspanel.com" className="text-sm text-orange-500 hover:underline break-all">
+                support@extipspanel.com
               </a>
               <p className="text-xs text-muted-foreground mt-2">For all general queries, billing & technical support.</p>
             </div>
@@ -97,7 +97,7 @@ export default function ContactUs() {
 
           <div className="mt-10 text-sm text-muted-foreground">
             <p>
-              For grievances, please email <a className="text-orange-500 hover:underline" href="mailto:support@extipspanel.pro">support@extipspanel.pro</a> with subject line "Grievance" — our grievance officer will respond within 48 hours.
+              For grievances, please email <a className="text-orange-500 hover:underline" href="mailto:support@extipspanel.com">support@extipspanel.com</a> with subject line "Grievance" — our grievance officer will respond within 48 hours.
             </p>
           </div>
         </div>

@@ -48,3 +48,6 @@ build = ["npm", "run", "build"]
 
 [userenv.production]
 NODE_ENV = "production"
+
+[userenv.shared]
+PUBLIC_APP_URL = "https://extipspanel.com"
