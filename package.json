@@ -9,8 +9,9 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run && npm run test:historical-seed",
+    "test": "vitest run && npm run test:historical-seed && npm run test:minimum-scheduling",
     "test:historical-seed": "node --test server/test/historicalOrderSeed.integration.test.js",
+    "test:minimum-scheduling": "node --test server/test/providerMinimum.test.js",
     "test:watch": "vitest"
   },
   "dependencies": {

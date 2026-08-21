@@ -9,6 +9,40 @@ import { getEnvProvider, isValidProviderApiUrl } from './provider-config.js';
 
 const ENV_PROVIDER = getEnvProvider();
 
+/** Normalize a configured provider minimum to a usable whole-number quantity. */
+export function normalizeProviderMinimum(minimum) {
+  const parsed = Math.ceil(Number(minimum));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+/** Convert a customer-facing scheduled quantity to the quantity sent to a provider. */
+export function getProviderOrderQuantity(quantity, deliveryMultiplier = 1) {
+  const requested = Math.max(0, Math.ceil(Number(quantity) || 0));
+  const multiplier = Number(deliveryMultiplier);
+  return Number.isFinite(multiplier) && multiplier > 0
+    ? Math.ceil(requested / multiplier)
+    : requested;
+}
+
+/** Whether an API error is a deterministic provider minimum-quantity rejection. */
+export function isProviderMinimumQuantityError(error) {
+  const message = String(error?.message ?? error ?? '').toLowerCase();
+  return (
+    /\b(min(?:imum)?|min\.)\s*(?:order\s*)?(?:quantity|amount|limit)\b/.test(message) ||
+    /\b(?:quantity|amount|order)\b.*\b(min(?:imum)?|min\.)\b/.test(message) ||
+    /\bmin(?:imum)?\s*(?::|=|is)?\s*\d+\b/.test(message) ||
+    /\b(?:quantity|amount|order)\b.*\b(?:at least|not less than|below)\s*\d+\b/.test(message)
+  );
+}
+
+export class ProviderMinimumQuantityError extends Error {
+  constructor({ quantity, minimum }) {
+    super(`Provider minimum quantity is ${minimum}; attempted ${quantity}`);
+    this.name = 'ProviderMinimumQuantityError';
+    this.code = 'PROVIDER_MINIMUM_QUANTITY';
+  }
+}
+
 // providerConfigured is now always true — DB has actual accounts.
 // We expose it as a getter so it reflects live DB state.
 export const providerConfigured = true;
@@ -27,9 +61,10 @@ const STATUS_MAP = {
 async function pickAccount(serviceId = null) {
   if (serviceId) {
     const { rows } = await query(
-      `SELECT pa.id, pa.api_url, pa.api_key, m.provider_service_id
+      `SELECT pa.id, pa.api_url, pa.api_key, m.provider_service_id, s.min_quantity
          FROM service_provider_mapping m
          JOIN provider_accounts pa ON pa.id = m.provider_account_id
+         JOIN services s ON s.id = m.service_id
         WHERE m.service_id = $1
           AND m.is_active = true
           AND pa.is_active = true
@@ -44,7 +79,7 @@ async function pickAccount(serviceId = null) {
     // Legacy regular services may be linked directly to providers without a
     // service_provider_mapping row. Respect only active, credentialed providers.
     const { rows: legacyRows } = await query(
-      `SELECT NULL::uuid AS id, p.api_url, p.api_key, s.provider_service_id
+      `SELECT NULL::uuid AS id, p.api_url, p.api_key, s.provider_service_id, s.min_quantity
          FROM services s
          JOIN providers p ON p.id = s.provider_id
         WHERE s.id = $1
@@ -111,12 +146,17 @@ export async function placeProviderOrder({ serviceId, providerServiceId, link, q
   if (!resolvedProviderServiceId) {
     throw new Error('Provider service ID is not configured');
   }
+  const requestedQuantity = Math.ceil(Number(quantity) || 0);
+  const minimum = normalizeProviderMinimum(acct.min_quantity);
+  if (requestedQuantity < minimum) {
+    throw new ProviderMinimumQuantityError({ quantity: requestedQuantity, minimum });
+  }
 
   const raw = await callProvider(acct, {
     action: 'add',
     service: String(resolvedProviderServiceId),
     link,
-    quantity: String(quantity),
+    quantity: String(requestedQuantity),
   });
   await markUsed(acct.id);
 

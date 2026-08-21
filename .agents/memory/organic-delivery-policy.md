@@ -9,6 +9,12 @@ Apply organic quantity and timing randomization only when creating new orders. D
 
 **How to apply:** Generate and validate randomized quantities and gaps before saving a new schedule; never alter quantities inside the dispatch cron.
 
+Provider minimums apply to the quantity sent to the provider after an account's delivery multiplier is applied. New schedules must use the largest active multiplier for the selected service, while dispatch must reject undersized provider requests before making an API call. If an older tail cannot meet that floor, move it atomically into a pending sibling or hold it without consuming retries.
+
+**Why:** A customer-facing scheduled quantity can become an undersized provider request after multiplier conversion. Retrying the provider's deterministic minimum error exhausts a valid order's retry budget and may make it appear failed.
+
+**How to apply:** Keep the selected bundle service attached throughout validation and schedule generation, preserve the exact total when moving a tail, and give transient failures or a compatible-but-busy provider precedence over minimum-only handling.
+
 If an active provider account or service mapping is unavailable, keep the run pending with a visible configuration error. Never create a simulated provider ID or mark a run completed without a real provider response.
 
 **Why:** Simulated completions were shown as delivered even though no provider request occurred, which is unacceptable for paid orders.

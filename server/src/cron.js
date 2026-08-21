@@ -21,6 +21,11 @@
 import { query, withTx } from './db.js';
 import { getEnvProvider, isValidProviderApiUrl } from './provider-config.js';
 import { areEngagementOrderWritesReady } from './seeds/historicalOrderSeed.js';
+import {
+  getProviderOrderQuantity,
+  isProviderMinimumQuantityError,
+  normalizeProviderMinimum,
+} from './provider.js';
 
 const BATCH_SIZE        = 25;
 const TICK_MS           = 15_000;
@@ -40,6 +45,19 @@ function isActiveLinkError(msg = '') {
     m.includes('already have an active order') ||
     m.includes('order with same link')
   );
+}
+
+export function getProviderQuantityDecision({ quantityToSend, deliveryMultiplier, providerMinimum }) {
+  const sendQty = getProviderOrderQuantity(quantityToSend, deliveryMultiplier);
+  const minimum = normalizeProviderMinimum(providerMinimum);
+  return { sendQty, minimum, meetsMinimum: sendQty >= minimum };
+}
+
+export function getDispatchFallback({ minimumProblemCount, busyProviderCount, lastError }) {
+  if (lastError) return 'retry';
+  if (busyProviderCount > 0) return 'wait';
+  if (minimumProblemCount > 0) return 'minimum';
+  return 'retry';
 }
 
 /** Low-level HTTP call to one SMM panel account. */
@@ -106,6 +124,7 @@ async function processBatch() {
         ors.retry_count,
         eo.link,
         eo.id                                                     AS order_id,
+         COALESCE(s.min_quantity, 1)                               AS provider_minimum,
         COALESCE(spm.provider_service_id, s.provider_service_id)  AS provider_service_id,
         COALESCE(spm.sort_order, 999)                             AS sort_order,
         pa.id                                                     AS account_id,
@@ -139,6 +158,7 @@ async function processBatch() {
           retry_count:               row.retry_count,
           link:                      row.link,
           order_id:                  row.order_id,
+           provider_minimum:          row.provider_minimum,
           provider_service_id:       row.provider_service_id,
           providers: [],
         });
@@ -197,20 +217,29 @@ async function dispatchRun(run) {
   }
 
   // ── Try providers in priority order ─────────────────────────────────────
-  let allBusy  = true;
-  let lastErr  = null;
+  const minimumProblems = [];
+  let busyProviderCount = 0;
+  let lastErr = null;
 
   for (const prov of providers) {
-    const sendQty = prov.delivery_multiplier > 0
-      ? Math.ceil(run.quantity_to_send / prov.delivery_multiplier)
-      : run.quantity_to_send;
+    const quantity = getProviderQuantityDecision({
+      quantityToSend: run.quantity_to_send,
+      deliveryMultiplier: prov.delivery_multiplier,
+      providerMinimum: run.provider_minimum,
+    });
+    if (!quantity.meetsMinimum) {
+      const problem = `Provider minimum is ${quantity.minimum}; scheduled batch sends ${quantity.sendQty}`;
+      minimumProblems.push(problem);
+      console.warn(`[cron] ⏸ Run ${run.id} not sent: ${problem}`);
+      continue;
+    }
 
     try {
       const data = await callAccount(prov, {
         action:   'add',
         service:  String(prov.provider_service_id),
         link:     run.link,
-        quantity: String(sendQty),
+        quantity: String(quantity.sendQty),
       });
 
       const providerOrderId = String(data.order ?? data.id ?? '');
@@ -218,7 +247,6 @@ async function dispatchRun(run) {
 
       // ✅ Order placed — mark as 'processing', NOT completed yet
       // Real completion is confirmed by the status-check loop below.
-      allBusy = false;
       await query(
         `UPDATE organic_run_schedule
             SET status='processing',
@@ -245,18 +273,39 @@ async function dispatchRun(run) {
 
     } catch (err) {
       if (isActiveLinkError(err.message)) {
+        busyProviderCount += 1;
         const providerLabel = String(prov.account_id || prov.account_name || 'provider').slice(0, 16);
         console.log(`[cron] ↩ Run ${run.id}: provider busy (${providerLabel}…), trying next`);
         continue;
       }
-      allBusy  = false;
+      if (isProviderMinimumQuantityError(err)) {
+        minimumProblems.push(String(err.message).slice(0, 500));
+        console.warn(`[cron] ⏸ Run ${run.id} rejected for provider minimum; trying next provider`);
+        continue;
+      }
       lastErr  = err;
       break;
     }
   }
 
+  const fallback = getDispatchFallback({
+    minimumProblemCount: minimumProblems.length,
+    busyProviderCount,
+    lastError: lastErr,
+  });
+
+  // A minimum error is deterministic. Try another mapped provider first; if none
+  // can accept it, merge this amount into a pending sibling or hold it for a
+  // provider/configuration change. Never spend the retry budget on this case.
+  if (fallback === 'minimum') {
+    const minimumProblem = minimumProblems.at(-1);
+    const result = await mergeOrHoldUndersizedRun(run, minimumProblem);
+    console.warn(`[cron] ⏸ Run ${run.id} ${result}: ${minimumProblem} (no retry_count change)`);
+    return;
+  }
+
   // ── All providers busy with this link → re-queue without penalty ─────────
-  if (allBusy) {
+  if (fallback === 'wait') {
     await query(
       `UPDATE organic_run_schedule
           SET status='pending',
@@ -283,6 +332,73 @@ async function dispatchRun(run) {
     [newStatus, lastErr?.message?.slice(0, 500), retryCount, run.id]
   );
   console.warn(`[cron] ❌ Run ${run.id} failed (attempt ${retryCount}): ${lastErr?.message}`);
+}
+
+async function mergeOrHoldUndersizedRun(run, reason) {
+  return withTx(async (client) => {
+    // Historical orders are deliberately excluded even if this helper is called
+    // directly in the future; they remain display-only records.
+    const { rows: siblings } = await client.query(
+      `SELECT candidate.id
+         FROM organic_run_schedule candidate
+         JOIN engagement_order_items eoi ON eoi.id = candidate.engagement_order_item_id
+         JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+        WHERE candidate.engagement_order_item_id = $1
+          AND candidate.id <> $2
+          AND candidate.status = 'pending'
+          AND eo.order_number >= $3
+        ORDER BY candidate.scheduled_at ASC
+        LIMIT 1
+        FOR UPDATE OF candidate`,
+      [run.engagement_order_item_id, run.id, MIN_LIVE_ORDER_NUMBER]
+    );
+
+    if (siblings[0]) {
+      const quantity = Math.max(0, Number(run.quantity_to_send) || 0);
+      const merged = await client.query(
+        `UPDATE organic_run_schedule current
+            SET status = 'cancelled',
+                quantity_to_send = 0,
+                base_quantity = 0,
+                started_at = NULL,
+                completed_at = now(),
+                error_message = $1
+           FROM engagement_order_items eoi
+           JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+          WHERE current.id = $2
+            AND eoi.id = current.engagement_order_item_id
+            AND eo.order_number >= $3
+            AND current.status = 'started'
+        RETURNING current.id`,
+        [`Merged into run ${siblings[0].id} (${quantity} moved): ${reason}`, run.id, MIN_LIVE_ORDER_NUMBER]
+      );
+      if (merged.rows[0]) {
+        await client.query(
+          `UPDATE organic_run_schedule
+              SET quantity_to_send = quantity_to_send + $1,
+                  base_quantity = base_quantity + $1
+            WHERE id = $2`,
+          [quantity, siblings[0].id]
+        );
+        return `merged into sibling run ${siblings[0].id}`;
+      }
+    }
+
+    await client.query(
+      `UPDATE organic_run_schedule current
+          SET status = 'held',
+              started_at = NULL,
+              error_message = $1
+         FROM engagement_order_items eoi
+         JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+        WHERE current.id = $2
+          AND eoi.id = current.engagement_order_item_id
+          AND eo.order_number >= $3
+          AND current.status = 'started'`,
+      [`Held: ${reason}. Add a compatible provider or reschedule this amount.`, run.id, MIN_LIVE_ORDER_NUMBER]
+    );
+    return 'held for compatible provider or manual rescheduling';
+  });
 }
 
 async function recoverSimulatedRuns() {

@@ -50,6 +50,23 @@ function getServiceConfig(engType) {
   return SERVICE_CONFIGS[engType] || SERVICE_CONFIGS.generic;
 }
 
+export function findBundleItemForEngagement(bundleItems, engagement) {
+  return bundleItems.find(item =>
+    item.engagement_type === engagement.type &&
+    (!engagement.service_id || item.service_id === engagement.service_id)
+  );
+}
+
+export function getEffectiveProviderMinimum(engagementType, serviceMinimum, maxDeliveryMultiplier = 1) {
+  const config = getServiceConfig(engagementType);
+  const providerMinimum = Math.max(
+    config.defaultMinQty,
+    PROVIDER_MINIMUMS[engagementType] || 0,
+    Number(serviceMinimum || 0)
+  );
+  return Math.ceil(providerMinimum * Math.max(1, Number(maxDeliveryMultiplier) || 1));
+}
+
 function clampVariance(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(5, Math.min(60, numeric)) : 25;
@@ -85,6 +102,7 @@ export function uniquifyScheduledRuns(runs, totalTargetQty, providerMin, maxBatc
     Math.ceil((total / base.length) * 1.25)
   );
   const floor = Math.max(1, providerMin);
+  if (total < floor) return [];
 
   // A provider floor can make the preview's run count impossible. Trim only
   // as many tail runs as needed; this applies to newly-created orders only.
@@ -313,13 +331,46 @@ router.post('/create', requireAuth, requireEngagementOrderReadiness, ah(async (r
   );
   if (!bItems.length) return res.status(400).json({ error: 'Bundle not found or empty' });
 
+  const serviceIds = [...new Set(bItems.map(item => item.service_id).filter(Boolean))];
+  const { rows: providerMultipliers } = serviceIds.length > 0
+    ? await query(
+      `SELECT m.service_id,
+              GREATEST(1, COALESCE(MAX(pa.delivery_multiplier), 1)) AS max_delivery_multiplier
+         FROM service_provider_mapping m
+         JOIN provider_accounts pa ON pa.id = m.provider_account_id
+        WHERE m.service_id = ANY($1::uuid[])
+          AND m.is_active = true
+          AND pa.is_active = true
+        GROUP BY m.service_id`,
+      [serviceIds]
+    )
+    : { rows: [] };
+  const maxMultiplierByService = new Map(
+    providerMultipliers.map(row => [row.service_id, Number(row.max_delivery_multiplier) || 1])
+  );
+
   let expectedTotal = 0;
+  const validatedEngagements = [];
   for (const eng of engagements) {
     const qty = Math.max(0, Math.floor(Number(eng?.quantity) || 0));
     if (qty <= 0) return res.status(400).json({ error: 'Invalid engagement quantity' });
-    const match = bItems.find(b => b.engagement_type === eng.type && (!eng.service_id || b.service_id === eng.service_id));
+    const match = findBundleItemForEngagement(bItems, eng);
     if (!match) return res.status(400).json({ error: `Engagement type "${eng.type}" not in bundle` });
+    const effectiveMinimum = getEffectiveProviderMinimum(
+      eng.type,
+      match.min_quantity,
+      maxMultiplierByService.get(match.service_id)
+    );
+    if (qty < effectiveMinimum) {
+      return res.status(400).json({
+        error: `${eng.type} quantity must be at least ${effectiveMinimum} for the configured provider`,
+      });
+    }
     expectedTotal += (qty / 1000) * Number(match.price_per_k || 0);
+    validatedEngagements.push({
+      engagement: { ...eng, quantity: qty, service_id: match.service_id },
+      bundleItem: match,
+    });
   }
   if (expectedTotal <= 0 || Math.abs(Number(total_price) - expectedTotal) / expectedTotal > 0.02) {
     return res.status(400).json({ error: `Price mismatch: expected ≈${expectedTotal.toFixed(6)}, got ${total_price}` });
@@ -376,15 +427,15 @@ router.post('/create', requireAuth, requireEngagementOrderReadiness, ah(async (r
 
     // Create items
     const items = [];
-    for (const eng of engagements) {
+    for (const { engagement: eng, bundleItem } of validatedEngagements) {
       const { rows: [item] } = await client.query(
         `INSERT INTO engagement_order_items
            (engagement_order_id, engagement_type, service_id, quantity, price, status)
          VALUES ($1,$2,$3,$4,$5,'pending')
          RETURNING *`,
-        [ord.id, eng.type, eng.service_id, eng.quantity, eng.price]
+        [ord.id, eng.type, bundleItem.service_id, eng.quantity, eng.price]
       );
-      items.push({ item, engagement: eng });
+      items.push({ item, engagement: eng, bundleItem });
     }
 
     return { order: ord, itemRows: items };
@@ -398,15 +449,17 @@ router.post('/create', requireAuth, requireEngagementOrderReadiness, ah(async (r
 
   let viewsStartMs = null;
 
-  for (const { item, engagement } of sortedItems) {
+  for (const { item, engagement, bundleItem } of sortedItems) {
     const engType = item.engagement_type;
     const config = getServiceConfig(engType);
     const baseMaxBatchCap = MAX_BATCH_CAPS[engType] || MAX_BATCH_CAPS.generic;
     const floorMin = PROVIDER_MINIMUMS[engType] || 0;
 
-    // Get provider min from bundle items
-    const bItem = bItems.find(b => b.engagement_type === engType);
-    let providerMin = Math.max(config.defaultMinQty, floorMin, Number(bItem?.min_quantity || 0));
+    const providerMin = getEffectiveProviderMinimum(
+      engType,
+      Math.max(floorMin, Number(bundleItem.min_quantity || 0)),
+      maxMultiplierByService.get(bundleItem.service_id)
+    );
 
     const isViewType = ['views', 'impressions', 'reach', 'plays', 'watch_hours'].includes(engType);
     let initialDelayMs;
