@@ -6,13 +6,14 @@ import { query } from '../db.js';
 import { PROFILES_SEED } from './profilesSeed.js';
 import { WALLETS_SEED } from './walletsSeed.js';
 import { BUNDLES_SEED } from './bundlesSeed.js';
-import { BUNDLE_ITEMS_SEED } from './bundleItemsSeed.js';
+import { BUNDLE_ITEMS_SEED, BUNDLE_ITEM_CONFIG_SEED } from './bundleItemsSeed.js';
+import { BUNDLE_SERVICES_SEED } from './bundleServicesSeed.js';
 
 const CHUNK = 50; // smaller batches = safer on prod
 
-async function seedTable(name, seedData, countQuery, insertFn) {
+async function seedTable(name, seedData, countQuery, insertFn, countParams = []) {
   try {
-    const { rows } = await query(countQuery);
+    const { rows } = await query(countQuery, countParams);
     const cnt = Number(rows[0]?.cnt ?? 0);
     if (cnt >= seedData.length) {
       console.log(`[seed] ${name}: already has ${cnt} rows — skipping`);
@@ -78,6 +79,30 @@ export async function seedAllData() {
     }
   );
 
+  // ── Services referenced by engagement bundles ─────────────────────────────
+  await seedTable(
+    'bundle services', BUNDLE_SERVICES_SEED,
+    `SELECT COUNT(*)::int AS cnt
+       FROM public.services
+      WHERE id = ANY($1::uuid[])`,
+    async (batch) => {
+      const res = await query(
+        `INSERT INTO public.services
+          (id, provider_id, provider_service_id, name, category, price,
+           min_quantity, max_quantity, speed, quality, drip_feed_enabled,
+           is_active, refill, cancel_allowed)
+         VALUES ${buildValues(batch, 14)}`,
+        batch.flatMap(r => [
+          r.id, r.provider_id, r.provider_service_id, r.name, r.category, r.price,
+          r.min_quantity, r.max_quantity, r.speed, r.quality, r.drip_feed_enabled,
+          r.is_active, r.refill, r.cancel_allowed,
+        ])
+      );
+      return res.rowCount || 0;
+    },
+    [BUNDLE_SERVICES_SEED.map(service => service.id)]
+  );
+
   // ── Engagement Bundles ────────────────────────────────────────────────────
   await seedTable(
     'engagement_bundles', BUNDLES_SEED,
@@ -105,6 +130,35 @@ export async function seedAllData() {
       return res.rowCount || 0;
     }
   );
+
+  // Restore pricing/ratio fields omitted by the original production import.
+  // Only null-priced rows are repaired, so later admin edits remain untouched.
+  try {
+    const values = BUNDLE_ITEM_CONFIG_SEED
+      .map((_, i) => {
+        const p = i * 4;
+        return `($${p + 1}::uuid, $${p + 2}::numeric, $${p + 3}::boolean, $${p + 4}::numeric)`;
+      })
+      .join(',');
+    const params = BUNDLE_ITEM_CONFIG_SEED.flatMap(item => [
+      item.id, item.ratio_percent, item.is_base, item.price_per_k,
+    ]);
+    const restored = await query(
+      `UPDATE bundle_items bi
+          SET ratio_percent = cfg.ratio_percent,
+              is_base = cfg.is_base,
+              price_per_k = cfg.price_per_k
+         FROM (VALUES ${values}) AS cfg(id, ratio_percent, is_base, price_per_k)
+        WHERE bi.id = cfg.id
+          AND bi.price_per_k IS NULL`,
+      params
+    );
+    if (restored.rowCount > 0) {
+      console.log(`[seed] restored pricing for ${restored.rowCount} bundle items`);
+    }
+  } catch (e) {
+    console.error('[seed] bundle item pricing repair failed:', e.message);
+  }
 
   // ── Engagement Orders ─────────────────────────────────────────────────────
   // NOTE: VPS order history intentionally NOT re-seeded (user requested clean slate).
