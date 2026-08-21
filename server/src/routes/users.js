@@ -5,6 +5,9 @@
 import express from 'express';
 import { query, withTx } from '../db.js';
 import { ah, requireAdmin } from '../middleware/auth.js';
+import {
+  requireEngagementOrderReadiness,
+} from '../middleware/engagementOrderReadiness.js';
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -12,7 +15,7 @@ router.use(requireAdmin);
 const INR_RATE = 83.5;
 
 // ─── GET /api/admin/users ─────────────────────────────────────────────────
-router.get('/', ah(async (_req, res) => {
+router.get('/', requireEngagementOrderReadiness, ah(async (_req, res) => {
   const { rows } = await query(`
     SELECT
       p.id,
@@ -98,7 +101,7 @@ router.patch('/:id/role', ah(async (req, res) => {
 }));
 
 // ─── POST /api/admin/users/:id/pause-orders ──────────────────────────────
-router.post('/:id/pause-orders', ah(async (req, res) => {
+router.post('/:id/pause-orders', requireEngagementOrderReadiness, ah(async (req, res) => {
   const { id: user_id } = req.params;
   await query(
     `UPDATE orders SET status='paused' WHERE user_id=$1 AND status IN ('pending','processing')`,
@@ -112,7 +115,7 @@ router.post('/:id/pause-orders', ah(async (req, res) => {
 }));
 
 // ─── POST /api/admin/users/:id/resume-orders ─────────────────────────────
-router.post('/:id/resume-orders', ah(async (req, res) => {
+router.post('/:id/resume-orders', requireEngagementOrderReadiness, ah(async (req, res) => {
   const { id: user_id } = req.params;
   const now = new Date().toISOString();
 
@@ -162,7 +165,7 @@ router.post('/:id/resume-orders', ah(async (req, res) => {
 
 // ─── POST /api/admin/users/:id/cancel-orders ─────────────────────────────
 // body: { refund: boolean }
-router.post('/:id/cancel-orders', ah(async (req, res) => {
+router.post('/:id/cancel-orders', requireEngagementOrderReadiness, ah(async (req, res) => {
   const { id: user_id } = req.params;
   const refund = req.body?.refund === true;
 

@@ -2,6 +2,9 @@ import express from 'express';
 import { z } from 'zod';
 import { query, withTx } from '../db.js';
 import { ah, validate, requireAdmin } from '../middleware/auth.js';
+import {
+  requireEngagementOrderReadiness,
+} from '../middleware/engagementOrderReadiness.js';
 import { fetchProviderBalance, providerConfigured } from '../provider.js';
 import { seedAllData } from '../seeds/seedAllData.js';
 
@@ -155,34 +158,38 @@ router.patch('/provider-accounts/:id', ah(async (req, res) => {
   res.json(rows[0]);
 }));
 
-router.delete('/provider-accounts/:id', ah(async (req, res) => {
-  const id = req.params.id;
-  await withTx(async (client) => {
-    const acct = await client.query(`SELECT * FROM provider_accounts WHERE id=$1`, [id]);
-    if (!acct.rows[0]) { const e = new Error('Not found'); e.status = 404; throw e; }
-    const { provider_id } = acct.rows[0];
+router.delete(
+  '/provider-accounts/:id',
+  requireEngagementOrderReadiness,
+  ah(async (req, res) => {
+    const id = req.params.id;
+    await withTx(async (client) => {
+      const acct = await client.query(`SELECT * FROM provider_accounts WHERE id=$1`, [id]);
+      if (!acct.rows[0]) { const e = new Error('Not found'); e.status = 404; throw e; }
+      const { provider_id } = acct.rows[0];
 
-    // Nullify FK refs
-    await client.query(`UPDATE organic_run_schedule SET provider_account_id=NULL WHERE provider_account_id=$1`, [id]);
-    await client.query(`DELETE FROM service_provider_mapping WHERE provider_account_id=$1`, [id]);
-    await client.query(`DELETE FROM provider_accounts WHERE id=$1`, [id]);
+      // Nullify FK refs
+      await client.query(`UPDATE organic_run_schedule SET provider_account_id=NULL WHERE provider_account_id=$1`, [id]);
+      await client.query(`DELETE FROM service_provider_mapping WHERE provider_account_id=$1`, [id]);
+      await client.query(`DELETE FROM provider_accounts WHERE id=$1`, [id]);
 
-    // If no accounts remain for this provider, clean up services + provider
-    const rem = await client.query(`SELECT id FROM provider_accounts WHERE provider_id=$1 LIMIT 1`, [provider_id]);
-    if (!rem.rows.length) {
-      const svcs = await client.query(`SELECT id FROM services WHERE provider_id=$1`, [provider_id]);
-      if (svcs.rows.length) {
-        const ids = svcs.rows.map(r => r.id);
-        await client.query(`UPDATE bundle_items SET service_id=NULL WHERE service_id=ANY($1)`, [ids]);
-        await client.query(`UPDATE engagement_order_items SET service_id=NULL WHERE service_id=ANY($1)`, [ids]);
-        await client.query(`DELETE FROM service_provider_mapping WHERE service_id=ANY($1)`, [ids]);
-        await client.query(`DELETE FROM services WHERE id=ANY($1)`, [ids]);
+      // If no accounts remain for this provider, clean up services + provider
+      const rem = await client.query(`SELECT id FROM provider_accounts WHERE provider_id=$1 LIMIT 1`, [provider_id]);
+      if (!rem.rows.length) {
+        const svcs = await client.query(`SELECT id FROM services WHERE provider_id=$1`, [provider_id]);
+        if (svcs.rows.length) {
+          const ids = svcs.rows.map(r => r.id);
+          await client.query(`UPDATE bundle_items SET service_id=NULL WHERE service_id=ANY($1)`, [ids]);
+          await client.query(`UPDATE engagement_order_items SET service_id=NULL WHERE service_id=ANY($1)`, [ids]);
+          await client.query(`DELETE FROM service_provider_mapping WHERE service_id=ANY($1)`, [ids]);
+          await client.query(`DELETE FROM services WHERE id=ANY($1)`, [ids]);
+        }
+        await client.query(`DELETE FROM providers WHERE id=$1`, [provider_id]);
       }
-      await client.query(`DELETE FROM providers WHERE id=$1`, [provider_id]);
-    }
-  });
-  res.json({ ok: true });
-}));
+    });
+    res.json({ ok: true });
+  })
+);
 
 // Balance check for one provider account
 router.post('/provider-accounts/:id/check-balance', ah(async (req, res) => {
@@ -443,6 +450,7 @@ router.patch(
 // Detaches all FK references then deletes the service.
 router.delete(
   '/services/:id',
+  requireEngagementOrderReadiness,
   validate(z.object({ id: z.string().uuid() }), 'params'),
   ah(async (req, res) => {
     const id = req.params.id;
@@ -869,6 +877,7 @@ router.get(
 // so status is derived from the organic_run_schedule queue.
 router.get(
   '/cron/status',
+  requireEngagementOrderReadiness,
   ah(async (_req, res) => {
     const { rows } = await query(`
       SELECT
@@ -906,6 +915,7 @@ router.get(
 // ── GET /queue-health ─────────────────────────────────────────────────────
 router.get(
   '/queue-health',
+  requireEngagementOrderReadiness,
   ah(async (_req, res) => {
     const { rows } = await query(`
       SELECT
@@ -1148,6 +1158,7 @@ const RUN_USER_USD = `
 // GET /topup-plan — per provider-account pending totals.
 router.get(
   '/topup-plan',
+  requireEngagementOrderReadiness,
   ah(async (_req, res) => {
     const { rows: ps } = await query(
       `SELECT COALESCE(global_markup_percent, 0) AS markup FROM platform_settings WHERE id = 'global'`
@@ -1191,6 +1202,7 @@ router.get(
 // GET /topup-breakdown — per provider-account × service pending totals.
 router.get(
   '/topup-breakdown',
+  requireEngagementOrderReadiness,
   ah(async (_req, res) => {
     const { rows } = await query(
       `SELECT
@@ -1231,6 +1243,7 @@ router.get(
 // GET /topup-users — top users by pending order value.
 router.get(
   '/topup-users',
+  requireEngagementOrderReadiness,
   ah(async (_req, res) => {
     const { rows } = await query(
       `WITH run_user AS (

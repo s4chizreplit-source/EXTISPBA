@@ -17,6 +17,9 @@ import orderRoutes from './routes/orders.js';
 import adminRoutes from './routes/admin.js';
 import engagementOrderRoutes from './routes/engagement-orders.js';
 import createEngagementOrderRoutes from './routes/create-engagement-order.js';
+import {
+  requireEngagementOrderReadiness,
+} from './middleware/engagementOrderReadiness.js';
 import zapupiRoutes from './routes/zapupi.js';
 import oxapayRoutes from './routes/oxapay.js';
 import bundleRoutes from './routes/bundles.js';
@@ -25,6 +28,7 @@ import stubRoutes from './routes/stubs.js';
 import { startCron } from './cron.js';
 import { seedAuthUsers } from './seeds/seedAuthUsers.js';
 import { seedAllData } from './seeds/seedAllData.js';
+import { areEngagementOrderWritesReady } from './seeds/historicalOrderSeed.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -84,6 +88,13 @@ app.use(
 app.get('/healthz', async (_req, res) => {
   try {
     await query('SELECT 1');
+    if (!areEngagementOrderWritesReady()) {
+      return res.status(503).json({
+        ok: false,
+        ready: false,
+        error: 'Historical engagement orders are not ready',
+      });
+    }
     res.json({ ok: true, uptime: process.uptime() });
   } catch (err) {
     res.status(503).json({ ok: false, error: err.message });
@@ -98,6 +109,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/admin/bundles', bundleRoutes);
 app.use('/api/admin/users', userAdminRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/engagement-orders', requireEngagementOrderReadiness);
 app.use('/api/engagement-orders', createEngagementOrderRoutes);
 app.use('/api/engagement-orders', engagementOrderRoutes);
 app.use('/api/zapupi', zapupiRoutes);
@@ -135,29 +147,34 @@ app.get('/api/bundles', requireAuth, ah(async (req, res) => {
 }));
 
 // Dashboard stats — single DB round-trip
-app.get('/api/dashboard/stats', requireAuth, ah(async (req, res) => {
-  const uid = req.session.userId;
-  const { rows } = await query(
-    `SELECT
-       COUNT(*) FILTER (WHERE src = 'order') AS total_orders,
-       COUNT(*) FILTER (WHERE src = 'order' AND status = 'completed') AS completed_orders,
-       COUNT(*) FILTER (WHERE src = 'order' AND status IN ('pending','processing')) AS active_orders,
-       COALESCE(SUM(price) FILTER (WHERE src = 'order'), 0) AS total_spent
-     FROM (
-       SELECT 'order' AS src, status, price::numeric AS price FROM orders WHERE user_id = $1
-       UNION ALL
-       SELECT 'order', status, total_price::numeric FROM engagement_orders WHERE user_id = $1
-     ) t`,
-    [uid]
-  );
-  const r = rows[0];
-  res.json({
-    totalOrders:     Number(r.total_orders),
-    completedOrders: Number(r.completed_orders),
-    activeOrders:    Number(r.active_orders),
-    totalSpent:      Number(r.total_spent),
-  });
-}));
+app.get(
+  '/api/dashboard/stats',
+  requireAuth,
+  requireEngagementOrderReadiness,
+  ah(async (req, res) => {
+    const uid = req.session.userId;
+    const { rows } = await query(
+      `SELECT
+         COUNT(*) FILTER (WHERE src = 'order') AS total_orders,
+         COUNT(*) FILTER (WHERE src = 'order' AND status = 'completed') AS completed_orders,
+         COUNT(*) FILTER (WHERE src = 'order' AND status IN ('pending','processing')) AS active_orders,
+         COALESCE(SUM(price) FILTER (WHERE src = 'order'), 0) AS total_spent
+       FROM (
+         SELECT 'order' AS src, status, price::numeric AS price FROM orders WHERE user_id = $1
+         UNION ALL
+         SELECT 'order', status, total_price::numeric FROM engagement_orders WHERE user_id = $1
+       ) t`,
+      [uid]
+    );
+    const r = rows[0];
+    res.json({
+      totalOrders:     Number(r.total_orders),
+      completedOrders: Number(r.completed_orders),
+      activeOrders:    Number(r.active_orders),
+      totalSpent:      Number(r.total_spent),
+    });
+  })
+);
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
@@ -166,7 +183,6 @@ if (fs.existsSync(distDir)) {
   app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
 }
 
-// eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
   const status = err.status || 500;
   if (status >= 500) console.error(err);

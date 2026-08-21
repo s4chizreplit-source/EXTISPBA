@@ -15,6 +15,18 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "build"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "server-lint"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -26,6 +38,39 @@ outputType = "webview"
 task = "shell.exec"
 args = "sh -c 'node server/src/index.js & exec npm run dev'"
 waitForPort = 5000
+
+[[workflows.workflow]]
+name = "test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "build"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run build"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "server-lint"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx eslint server/src/seeds/historicalOrderSeed.js server/src/middleware/engagementOrderReadiness.js server/src/routes/create-engagement-order.js server/src/routes/users.js server/src/routes/admin.js server/src/cron.js server/src/index.js server/test/historicalOrderSeed.integration.test.js"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[ports]]
 localPort = 3000

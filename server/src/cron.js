@@ -20,6 +20,7 @@
 
 import { query, withTx } from './db.js';
 import { getEnvProvider, isValidProviderApiUrl } from './provider-config.js';
+import { areEngagementOrderWritesReady } from './seeds/historicalOrderSeed.js';
 
 const BATCH_SIZE        = 25;
 const TICK_MS           = 15_000;
@@ -514,7 +515,16 @@ async function applyStatus(run, data) {
 
 // ── Startup + scheduling ──────────────────────────────────────────────────────
 
-export function startCron() {
+export function isCronReady(isReady = areEngagementOrderWritesReady) {
+  return isReady();
+}
+
+export function startCron({ isReady = areEngagementOrderWritesReady } = {}) {
+  if (!isCronReady(isReady)) {
+    console.warn('[cron] Dispatcher remains stopped until historical orders are ready');
+    return false;
+  }
+
   console.log(`[cron] Organic run dispatcher started (batch=${BATCH_SIZE}, tick=${TICK_MS / 1000}s)`);
 
   recoverSimulatedRuns()
@@ -561,10 +571,13 @@ export function startCron() {
 
   setTimeout(() => {
     const tick = () => {
+      if (!isCronReady(isReady)) return;
       processBatch().catch(e => console.error('[cron] Dispatch error:', e));
       checkProcessingRuns().catch(e => console.error('[cron] Status-check error:', e));
     };
     tick();
     setInterval(tick, TICK_MS);
   }, 5000);
+
+  return true;
 }
