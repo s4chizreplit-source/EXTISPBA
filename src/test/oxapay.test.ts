@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  createOxaPayInvoice,
   makeOxaPayEventHash,
   normalizeOxaPayPayload,
   parseWalletTopupAmount,
@@ -58,6 +59,35 @@ describe('OxaPay wallet top-up security', () => {
       paid_currency: null,
       expired_at: null,
     });
+  });
+
+  it('accepts a documented successful invoice response with an empty error placeholder', async () => {
+    const originalKey = process.env.OXAPAY_MERCHANT_API_KEY;
+    process.env.OXAPAY_MERCHANT_API_KEY = 'merchant-test-key';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        track_id: 'track-success',
+        payment_url: 'https://pay.oxapay.com/example',
+      },
+      message: 'Operation completed successfully!',
+      error: { type: null, key: null, message: null },
+      status: 200,
+      version: '1.0.0',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const { invoice } = await createOxaPayInvoice({ amount: 11.98 });
+      expect(invoice.trackId).toBe('track-success');
+      expect(invoice.paymentUrl).toBe('https://pay.oxapay.com/example');
+    } finally {
+      vi.unstubAllGlobals();
+      if (originalKey === undefined) delete process.env.OXAPAY_MERCHANT_API_KEY;
+      else process.env.OXAPAY_MERCHANT_API_KEY = originalKey;
+    }
   });
 
   it('requires a paid provider response for the exact deposit', () => {

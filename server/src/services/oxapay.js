@@ -166,6 +166,20 @@ function getMerchantKey() {
   return key;
 }
 
+function hasMeaningfulProviderError(error) {
+  if (error == null || error === false) return false;
+  if (typeof error === 'string') return error.trim().length > 0;
+  if (Array.isArray(error)) return error.length > 0;
+  if (typeof error === 'object') {
+    return Object.values(error).some(value => {
+      if (value == null || value === false) return false;
+      if (typeof value === 'string') return value.trim().length > 0;
+      return true;
+    });
+  }
+  return Boolean(error);
+}
+
 async function callOxaPay(path, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
@@ -187,11 +201,21 @@ async function callOxaPay(path, options = {}) {
     } catch {
       payload = {};
     }
-    const providerCode = Number(payload?.status);
+    const hasProviderCode =
+      payload?.status !== undefined &&
+      payload?.status !== null &&
+      String(payload.status).trim() !== '';
+    const providerCode = hasProviderCode ? Number(payload.status) : NaN;
+    const providerSucceeded =
+      Number.isFinite(providerCode) && providerCode >= 200 && providerCode < 300;
+    const providerFailed =
+      Number.isFinite(providerCode) && providerCode >= 400;
+    const providerError =
+      !providerSucceeded && hasMeaningfulProviderError(payload?.error);
     if (
       !response.ok ||
-      (Number.isFinite(providerCode) && providerCode >= 400) ||
-      payload?.error
+      providerFailed ||
+      providerError
     ) {
       const providerMessage =
         payload?.message ||
