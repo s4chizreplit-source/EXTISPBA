@@ -87,6 +87,13 @@ Each refresh:
 Successful snapshots are recorded in `replit_mirror.snapshots` on Supabase.
 Development servers do not refresh the mirror automatically.
 
+Mirror database connections authenticate the Supabase server with
+`verify-full` and the fingerprint-pinned Supabase Root 2021 CA in
+`certs/supabase-root-2021-ca.pem`; encryption-only fallbacks are not allowed.
+Before that root expires on 26 April 2031, download the current server root
+certificate from the Supabase Connect panel, replace the pinned certificate and
+fingerprint together, and rerun both the mirror tests and a forced mirror.
+
 ### Mirror recovery
 
 To run the app against the Supabase mirror:

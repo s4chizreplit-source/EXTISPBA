@@ -194,6 +194,48 @@ export async function seedAllData() {
     console.error('[seed] bundle item pricing repair failed:', e.message);
   }
 
+  // Keep the Instagram bundle aligned with the imported min-10 saves service.
+  // This is a data reconciliation (not schema migration), so it also repairs
+  // existing production data when a new deployment starts.
+  try {
+    const repaired = await query(`
+      WITH replacement AS (
+        SELECT s.id
+          FROM services s
+          JOIN service_provider_mapping m
+            ON m.service_id = s.id
+           AND m.is_active = true
+          JOIN provider_accounts pa
+            ON pa.id = m.provider_account_id
+           AND pa.is_active = true
+         WHERE s.is_active = true
+           AND s.provider_service_id = '2893'
+           AND s.min_quantity = 10
+           AND LOWER(pa.name) = 'apichp'
+         ORDER BY m.sort_order, s.id
+         LIMIT 1
+      )
+      UPDATE bundle_items bi
+         SET service_id = replacement.id
+        FROM engagement_bundles b, replacement
+       WHERE b.id = bi.bundle_id
+         AND LOWER(b.platform) = 'instagram'
+         AND bi.engagement_type = 'saves'
+         AND EXISTS (
+           SELECT 1
+             FROM services current_service
+            WHERE current_service.id = bi.service_id
+              AND current_service.provider_service_id = '2903'
+              AND current_service.min_quantity = 100
+         )
+    `);
+    if (repaired.rowCount > 0) {
+      console.log(`[seed] repaired ${repaired.rowCount} Instagram saves bundle mapping(s) to min 10`);
+    }
+  } catch (e) {
+    console.error('[seed] Instagram saves mapping repair failed:', e.message);
+  }
+
   // ── Engagement Orders ─────────────────────────────────────────────────────
   // Move the approved Preview campaign before opening engagement-order writes.
   // The source UUID makes this idempotent; production assigns the next number.

@@ -266,9 +266,6 @@ export default function EngagementOrder() {
         const matchesType = keywords.some(kw => name.includes(kw));
         return matchesPlatform && matchesType;
       });
-      const positiveMins = matchingServices.map(s => s.min_quantity ?? 0).filter(n => n > 0);
-      const lowestMatchedMin = positiveMins.length > 0 ? Math.min(...positiveMins) : undefined;
-
       // Admin-set bundle-level per-1000 price overrides everything.
       // Provider rotate ho ya nahi, ye fixed price hi user ko charge hota hai.
       const adminPricePerK =
@@ -276,12 +273,13 @@ export default function EngagementOrder() {
           ? Number(item.price_per_k)
           : null;
 
-      // 1) Try the linked service first, but show the lowest provider minimum across the rotation pool
+      // 1) The linked service is also the server-side routing target, so its
+      // provider minimum must be the one shown and validated in the form.
       if (item.service && (adminPricePerK !== null || item.service.price > 0)) {
         prices[item.engagement_type] = {
           pricePerK: adminPricePerK ?? item.service.price,
           serviceId: item.service.id,
-          minQuantity: effectiveMinimum(item.engagement_type, lowestMatchedMin ?? item.service.min_quantity),
+          minQuantity: effectiveMinimum(item.engagement_type, item.service.min_quantity),
         };
         return;
       }
@@ -309,7 +307,7 @@ export default function EngagementOrder() {
         prices[item.engagement_type] = {
           pricePerK: adminPricePerK ?? item.service.price,
           serviceId: item.service.id,
-          minQuantity: effectiveMinimum(item.engagement_type, lowestMatchedMin ?? item.service.min_quantity),
+          minQuantity: effectiveMinimum(item.engagement_type, item.service.min_quantity),
         };
       }
     });

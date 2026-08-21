@@ -1,3 +1,5 @@
+-- Replit Publish synchronizes the application public schema. Keep mirror
+-- scheduler status here so a fresh production publish always provisions it.
 CREATE TABLE IF NOT EXISTS public.database_mirror_runs (
   id BIGSERIAL PRIMARY KEY,
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),

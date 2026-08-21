@@ -98,3 +98,7 @@ test('same-type bundle items use the explicitly selected service minimum', () =>
   assert.equal(selected.service_id, 'service-large');
   assert.equal(getEffectiveProviderMinimum('likes', selected.min_quantity, 2), 150);
 });
+
+test('an imported saves minimum of 10 remains 10 with a normal provider', () => {
+  assert.equal(getEffectiveProviderMinimum('saves', 10, 1), 10);
+});

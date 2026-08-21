@@ -10,6 +10,7 @@ import {
   extractSupabaseProjectRef,
   filterPublicRestoreList,
   getMirrorTargetEnvironment,
+  isCanonicalSupabaseDatabaseHost,
   isProductionRuntime,
   sanitizeMirrorError,
 } from '../src/services/databaseMirror.js';
@@ -58,9 +59,33 @@ test('target command environment excludes unrelated application secrets', () => 
   );
   assert.equal(env.PGUSER, 'postgres.project');
   assert.equal(env.PGPASSWORD, 'p@ss');
-  assert.equal(env.PGSSLMODE, 'require');
+  assert.equal(env.PGSSLMODE, 'verify-full');
+  assert.match(env.PGSSLROOTCERT, /certs\/supabase-root-2021-ca\.pem$/);
   assert.equal('SESSION_SECRET' in env, false);
   assert.equal('PROVIDER_API_KEY' in env, false);
+});
+
+test('target host validation rejects lookalike Supabase suffixes', () => {
+  assert.equal(
+    isCanonicalSupabaseDatabaseHost('aws-0-ap-southeast-1.pooler.supabase.com', 'projectref'),
+    true
+  );
+  assert.equal(
+    isCanonicalSupabaseDatabaseHost('db.projectref.supabase.co', 'projectref'),
+    true
+  );
+  assert.equal(
+    isCanonicalSupabaseDatabaseHost('aws-0-ap-southeast-1.pooler.supabase.com.attacker.test', 'projectref'),
+    false
+  );
+  assert.equal(
+    isCanonicalSupabaseDatabaseHost('evil.pooler.supabase.com', 'projectref'),
+    false
+  );
+  assert.equal(
+    isCanonicalSupabaseDatabaseHost('db.otherproject.supabase.co', 'projectref'),
+    false
+  );
 });
 
 test('validation SQL verifies inventory, counts, credentials, and relationships', () => {
@@ -143,8 +168,7 @@ test('mirror status migration is idempotent on a clean schema', async () => {
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET LOCAL search_path TO "${schema}"`);
     const scopedMigration = migration
-      .replaceAll('replit_ops.database_mirror_runs', `"${schema}".database_mirror_runs`)
-      .replace('CREATE SCHEMA IF NOT EXISTS replit_ops;', '');
+      .replaceAll('public.database_mirror_runs', `"${schema}".database_mirror_runs`);
     await client.query(scopedMigration);
     await client.query(scopedMigration);
     const { rows } = await client.query(

@@ -51,9 +51,13 @@ export function baselineMinimum(type: string): number {
   return PROVIDER_MINIMUMS[type] ?? 10;
 }
 
-/** Effective minimum used by the order form — baseline wins over DB values. */
-export function effectiveMinimum(type: string, _dbMin?: number | null): number {
-  return baselineMinimum(type);
+/** Effective minimum used by the order form — honor the routed service minimum. */
+export function effectiveMinimum(type: string, dbMin?: number | null): number {
+  const baseline = baselineMinimum(type);
+  const configured = Math.ceil(Number(dbMin));
+  return Number.isFinite(configured) && configured > 0
+    ? Math.max(baseline, configured)
+    : baseline;
 }
 
 // Provider maximum order quantity

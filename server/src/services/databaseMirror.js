@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createHash, X509Certificate } from 'node:crypto';
+import { createReadStream, readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { ReplitConnectors } from '@replit/connectors-sdk';
 import { pool } from '../db.js';
@@ -32,6 +33,11 @@ const MIRROR_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 const CONNECTOR_TIMEOUT_MS = 20 * 1000;
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const EXCLUDED_TABLE_DATA = new Set(['user_sessions']);
+const SUPABASE_ROOT_CA_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../certs/supabase-root-2021-ca.pem'
+);
+const SUPABASE_ROOT_CA_SHA256 = '807025AD50D4ED219D2C9C7D299C004F824EB00CF7F65AFEF607D07B72E6CAFA';
 
 let runningMirrorPromise = null;
 let initialTimer = null;
@@ -61,6 +67,15 @@ export function isProductionRuntime(env = process.env) {
   return env.NODE_ENV === 'production' || env.REPLIT_DEPLOYMENT === '1';
 }
 
+export function isCanonicalSupabaseDatabaseHost(hostname, projectRef) {
+  const normalizedHost = String(hostname || '').toLowerCase();
+  const normalizedRef = String(projectRef || '').toLowerCase();
+  return (
+    normalizedHost === `db.${normalizedRef}.supabase.co` ||
+    /^(?:aws|gcp|azure)-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/.test(normalizedHost)
+  );
+}
+
 export function extractSupabaseProjectRef(databaseUrl) {
   let parsed;
   try {
@@ -77,7 +92,10 @@ export function extractSupabaseProjectRef(databaseUrl) {
 
   const username = decodeURIComponent(parsed.username);
   const poolerMatch = username.match(/^postgres\.([a-z0-9]+)$/i);
-  if (parsed.hostname.includes('pooler.supabase.com') && poolerMatch) {
+  if (
+    poolerMatch &&
+    isCanonicalSupabaseDatabaseHost(parsed.hostname, poolerMatch[1])
+  ) {
     return poolerMatch[1].toLowerCase();
   }
 
@@ -96,8 +114,8 @@ export function filterPublicRestoreList(listText) {
 export function getMirrorTargetEnvironment(databaseUrl, baseEnv = process.env) {
   const env = getPgDumpEnvironment(databaseUrl, baseEnv);
   env.PGAPPNAME = 'extipspanel-database-mirror';
-  env.PGSSLMODE = 'require';
-  delete env.PGSSLROOTCERT;
+  env.PGSSLMODE = 'verify-full';
+  env.PGSSLROOTCERT = SUPABASE_ROOT_CA_PATH;
   return env;
 }
 
@@ -133,6 +151,15 @@ async function connectedSupabaseProjectRef() {
   }
 }
 
+function getPinnedSupabaseRootCertificate() {
+  const ca = readFileSync(SUPABASE_ROOT_CA_PATH, 'utf8');
+  const fingerprint = new X509Certificate(ca).fingerprint256.replaceAll(':', '').toUpperCase();
+  if (fingerprint !== SUPABASE_ROOT_CA_SHA256) {
+    throw new Error('Pinned Supabase root certificate fingerprint mismatch');
+  }
+  return ca;
+}
+
 function targetClientConfig(databaseUrl) {
   const parsed = new URL(databaseUrl);
   return {
@@ -145,7 +172,11 @@ function targetClientConfig(databaseUrl) {
     connectionTimeoutMillis: 20_000,
     statement_timeout: 60_000,
     query_timeout: 60_000,
-    ssl: { rejectUnauthorized: false },
+    ssl: {
+      ca: getPinnedSupabaseRootCertificate(),
+      rejectUnauthorized: true,
+      servername: parsed.hostname,
+    },
   };
 }
 
@@ -158,6 +189,9 @@ async function validateMirrorTarget(databaseUrl) {
 
   const sourceUrl = new URL(process.env.DATABASE_URL);
   const targetUrl = new URL(databaseUrl);
+  if (!isCanonicalSupabaseDatabaseHost(targetUrl.hostname, targetRef)) {
+    throw new Error('Mirror target host is not a canonical Supabase database host');
+  }
   if (
     sourceUrl.hostname === targetUrl.hostname &&
     sourceUrl.pathname === targetUrl.pathname &&
@@ -169,8 +203,11 @@ async function validateMirrorTarget(databaseUrl) {
   const client = new Client(targetClientConfig(databaseUrl));
   await client.connect();
   try {
-    if (client.connection?.stream?.encrypted !== true) {
-      throw new Error('Mirror target connection is not encrypted');
+    if (
+      client.connection?.stream?.encrypted !== true ||
+      client.connection?.stream?.authorized !== true
+    ) {
+      throw new Error('Mirror target connection is not authenticated with the pinned certificate');
     }
     const { rows } = await client.query(`
       SELECT current_database() AS database_name,
@@ -550,7 +587,7 @@ async function runLockedMirror(lockClient, {
   sourceEnvironment,
 } = {}) {
   await lockClient.query(`
-    UPDATE replit_ops.database_mirror_runs
+    UPDATE public.database_mirror_runs
        SET status='failed',
            completed_at=now(),
            error_message='Previous mirror process ended before completion'
@@ -562,7 +599,7 @@ async function runLockedMirror(lockClient, {
     SELECT
       MAX(completed_at) FILTER (WHERE status='succeeded') AS last_success_at,
       MAX(started_at) AS last_attempt_at
-    FROM replit_ops.database_mirror_runs
+    FROM public.database_mirror_runs
   `);
   const { last_success_at: lastSuccessAt, last_attempt_at: lastAttemptAt } = schedule.rows[0];
   if (!force && !isBackupDue({
@@ -576,7 +613,7 @@ async function runLockedMirror(lockClient, {
   }
 
   const run = await lockClient.query(
-    `INSERT INTO replit_ops.database_mirror_runs
+    `INSERT INTO public.database_mirror_runs
        (status, source_environment, started_at)
      VALUES ('running', $1, $2)
      RETURNING id`,
@@ -622,7 +659,7 @@ async function runLockedMirror(lockClient, {
     });
 
     await lockClient.query(
-      `UPDATE replit_ops.database_mirror_runs
+      `UPDATE public.database_mirror_runs
           SET status='succeeded',
               target_project_ref=$1,
               source_table_count=$2,
@@ -652,7 +689,7 @@ async function runLockedMirror(lockClient, {
   } catch (error) {
     const safeMessage = sanitizeMirrorError(error);
     await lockClient.query(
-      `UPDATE replit_ops.database_mirror_runs
+      `UPDATE public.database_mirror_runs
           SET status='failed', completed_at=now(), error_message=$1
         WHERE id=$2`,
       [safeMessage, runId]
