@@ -35,6 +35,18 @@ if (!process.env.SESSION_SECRET) {
 const app = express();
 app.set('trust proxy', 1);
 
+// ── Static assets + health-check root BEFORE session middleware ────────────
+// GCE startup probe hits GET / — serve it instantly without any DB round-trip.
+const distDir = path.resolve(__dirname, '..', '..', 'dist');
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir, { maxAge: '1h', index: false }));
+  app.get('/', (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
+} else {
+  app.get('/', (_req, res) =>
+    res.status(200).send('OrganicSMM Pro API is running.')
+  );
+}
+
 app.use(
   helmet({
     contentSecurityPolicy: false, // the SPA loads its own assets/fonts
@@ -138,15 +150,9 @@ app.get('/api/dashboard/stats', requireAuth, ah(async (req, res) => {
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// Serve the built SPA (dist/) with client-side routing fallback.
-const distDir = path.resolve(__dirname, '..', '..', 'dist');
+// SPA fallback for client-side routing (non-API, non-asset paths like /dashboard, /orders, etc.)
 if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir, { maxAge: '1h', index: false }));
   app.get(/.*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')));
-} else {
-  app.get('/', (_req, res) =>
-    res.status(200).send('OrganicSMM Pro API is running. Build the frontend to serve the UI.')
-  );
 }
 
 // eslint-disable-next-line no-unused-vars
