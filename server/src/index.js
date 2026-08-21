@@ -29,6 +29,7 @@ import { startCron } from './cron.js';
 import { seedAuthUsers } from './seeds/seedAuthUsers.js';
 import { seedAllData } from './seeds/seedAllData.js';
 import { areEngagementOrderWritesReady } from './seeds/historicalOrderSeed.js';
+import { startDatabaseBackupScheduler } from './services/databaseBackup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -193,7 +194,10 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`OrganicSMM Pro API listening on :${PORT}`);
   seedAuthUsers()
     .then(() => seedAllData())
-    .then(() => startCron())
+    .then(() => {
+      startCron();
+      startDatabaseBackupScheduler();
+    })
     .catch(e => {
       console.error('[startup] critical data readiness failed:', e.message);
     });
