@@ -60,3 +60,46 @@ permissions.
 
 Never publish the bucket, share a backup URL, or paste database credentials into
 logs or chat.
+
+## Supabase database mirror
+
+The published server also refreshes the `extips-backup` Supabase PostgreSQL
+database every six hours. This is separate from Storage archives: the mirror
+creates real application tables and rows in Supabase's `public` schema, so they
+are visible in Table Editor and can be used by a replacement backend.
+
+Only the application's `public` schema is mirrored. Supabase-managed `auth`,
+`storage`, and other internal schemas are never restored or replaced. Login
+continues to use `public.auth_users`; user IDs and bcrypt password hashes are
+validated by a one-way fingerprint during each refresh. Active
+`public.user_sessions` rows are intentionally not copied, so users must sign in
+again after a recovery.
+
+Each refresh:
+
+1. Exports a consistent source snapshot from the published production database.
+2. Restores it to Supabase in one transaction.
+3. Verifies the complete public table inventory, every table's row count,
+   bcrypt credential fingerprint, and critical user relationships before commit.
+4. Rolls back on any restore or verification failure, preserving the previous
+   healthy mirror.
+
+Successful snapshots are recorded in `replit_mirror.snapshots` on Supabase.
+Development servers do not refresh the mirror automatically.
+
+### Mirror recovery
+
+To run the app against the Supabase mirror:
+
+1. Deploy the complete project, including the Express server—not only the Vite
+   frontend.
+2. Set that deployment's `DATABASE_URL` to the secure Supabase Session pooler
+   PostgreSQL URI.
+3. Configure `SESSION_SECRET`, provider/OxaPay/Zapupi credentials, and other
+   required environment secrets separately. Secrets are never copied into the
+   database mirror.
+4. Rotate `SESSION_SECRET`, start the backend, confirm `/healthz`, and test login,
+   wallet balances, orders, and the dispatcher before changing DNS.
+
+The mirror may be up to six hours behind the primary database. Storage archives
+remain the longer-retention recovery option.

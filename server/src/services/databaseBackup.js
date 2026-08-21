@@ -163,7 +163,7 @@ function minimalCommandEnvironment(baseEnv = process.env) {
   return env;
 }
 
-async function runCommand(command, args, { env, timeoutMs = COMMAND_TIMEOUT_MS } = {}) {
+export async function runCommand(command, args, { env, timeoutMs = COMMAND_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       env: env || minimalCommandEnvironment(),
@@ -209,7 +209,7 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
-async function assertValidArchive(filePath) {
+export async function assertValidArchive(filePath) {
   const header = Buffer.alloc(5);
   const file = await open(filePath, 'r');
   try {
