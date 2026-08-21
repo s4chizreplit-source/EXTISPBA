@@ -381,7 +381,7 @@ export default function EngagementOrderDetail() {
     
     const completedRuns = allRuns.filter((r: any) => r.status === 'completed');
     const pendingRuns = allRuns.filter((r: any) => r.status === 'pending');
-    const startedRuns = allRuns.filter((r: any) => r.status === 'started');
+    const startedRuns = allRuns.filter((r: any) => r.status === 'started' || r.status === 'processing');
     const failedRuns = allRuns.filter((r: any) => r.status === 'failed');
     
     // Calculate ACTUAL delivered from provider data (provider_status + remains)
@@ -763,7 +763,7 @@ export default function EngagementOrderDetail() {
               }
               if (r.status === 'completed') {
                 return sum + r.quantity_to_send;
-              } else if ((r.status === 'started' || r.status === 'failed') && r.provider_remains !== null && r.provider_remains !== undefined) {
+              } else if ((r.status === 'started' || r.status === 'processing' || r.status === 'failed') && r.provider_remains !== null && r.provider_remains !== undefined) {
                 return sum + Math.max(0, r.quantity_to_send - r.provider_remains);
               }
               return sum;

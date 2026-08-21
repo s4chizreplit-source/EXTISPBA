@@ -349,7 +349,7 @@ export function TypeHistoryCard({
               {runsWithSchedule.map((run, idx) => {
                 const autoCompleted = isTargetMetAutoCompleted(run);
                 const isPending = !autoCompleted && run.status === 'pending';
-                const isActive = !autoCompleted && run.status === 'started';
+                const isActive = !autoCompleted && (run.status === 'started' || run.status === 'processing');
                 const isCompleted = autoCompleted || run.status === 'completed';
                 const isFailed = !autoCompleted && run.status === 'failed';
                 const scheduledDate = new Date(run.scheduled_at);

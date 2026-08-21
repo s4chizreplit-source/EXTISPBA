@@ -70,7 +70,7 @@ export function TypeHistoryTable({
   const sortedRuns = [...runs].sort((a, b) => a.run_number - b.run_number);
   const completedRuns = runs.filter(r => r.status === 'completed');
   const pendingRuns = runs.filter(r => r.status === 'pending');
-  const startedRuns = runs.filter(r => r.status === 'started');
+  const startedRuns = runs.filter(r => r.status === 'started' || r.status === 'processing');
 
   return (
     <div className="space-y-4">
@@ -136,7 +136,7 @@ export function TypeHistoryTable({
               const statusConfig = STATUS_CONFIG[run.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.pending;
               const StatusIcon = statusConfig.icon;
               const isPending = run.status === 'pending';
-              const isActive = run.status === 'started';
+              const isActive = run.status === 'started' || run.status === 'processing';
               const scheduledDate = new Date(run.scheduled_at);
               const isPast = scheduledDate < new Date() && isPending;
 
@@ -153,7 +153,7 @@ export function TypeHistoryTable({
                   <div className="col-span-1">
                     <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
                       run.status === 'completed' ? 'bg-green-100 text-green-700 border-2 border-green-300' :
-                      run.status === 'started' ? 'bg-blue-100 text-blue-700 border-2 border-blue-300 animate-pulse' :
+                      (run.status === 'started' || run.status === 'processing') ? 'bg-blue-100 text-blue-700 border-2 border-blue-300 animate-pulse' :
                       run.status === 'failed' ? 'bg-red-100 text-red-700 border-2 border-red-300' :
                       'bg-muted text-muted-foreground border-2 border-border'
                     }`}>
