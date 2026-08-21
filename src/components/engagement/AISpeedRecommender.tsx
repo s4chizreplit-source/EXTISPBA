@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Brain, Loader2, Sparkles, AlertTriangle, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
 interface Recommendation {
@@ -35,19 +34,19 @@ export function AISpeedRecommender({ link, platform, types, totalQuantity, onApp
     }
     setLoading(true);
     setRec(null);
-    const { data, error } = await supabase.functions.invoke("ai-speed-recommender", {
-      body: { link, platform, types, totalQuantity },
-    });
+    try {
+      const res = await fetch('/api/ai/speed-recommender', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link, platform, types, totalQuantity }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'AI service unavailable');
+      setRec(data?.recommendation || {});
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
+    }
     setLoading(false);
-    if (error) {
-      toast({ title: "AI error", description: error.message, variant: "destructive" });
-      return;
-    }
-    if (data?.error) {
-      toast({ title: "AI error", description: data.error, variant: "destructive" });
-      return;
-    }
-    setRec(data?.recommendation || {});
   };
 
   const safety = rec?.safety_score || 0;

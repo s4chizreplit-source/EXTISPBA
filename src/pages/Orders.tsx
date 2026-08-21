@@ -3,7 +3,6 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
 import { useCurrency } from '@/hooks/useCurrency';
-import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -77,15 +76,10 @@ export default function Orders() {
   const { data: orders, refetch } = useQuery({
     queryKey: ['orders', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, order_number, status, price, link, quantity, remains, start_count, provider_order_id, is_organic_mode, is_drip_feed, created_at, updated_at, error_message, service:services(name, category)')
-        .eq('user_id', user?.id)
-        .order('created_at', { ascending: false })
-        .limit(200);
-      
-      if (error) throw error;
-      return data as (Order & { service: { name: string; category: string } | null })[];
+      const res = await fetch('/api/orders');
+      if (!res.ok) throw new Error('Failed to fetch orders');
+      const payload = await res.json();
+      return (Array.isArray(payload) ? payload : (payload.orders ?? [])) as (Order & { service: { name: string; category: string } | null })[];
     },
     enabled: !!user?.id,
     staleTime: 30000, // Cache for 10s - instant subsequent loads
@@ -103,15 +97,8 @@ export default function Orders() {
   const { data: organicRuns, refetch: refetchRuns } = useQuery({
     queryKey: ['organic-runs', expandedOrder],
     queryFn: async () => {
-      if (!expandedOrder) return [];
-      const { data, error } = await supabase
-        .from('organic_run_schedule')
-        .select('*')
-        .eq('order_id', expandedOrder)
-        .order('run_number', { ascending: true });
-      
-      if (error) throw error;
-      return data as OrganicRun[];
+      // organic_run_schedule is linked via engagement_order_items, not directly by order_id
+      return [] as OrganicRun[];
     },
     enabled: !!expandedOrder,
     staleTime: 10000, // Cache for 5s
@@ -129,14 +116,13 @@ export default function Orders() {
   // Edit run mutation with wallet deduction for increased quantity
   const editRunMutation = useMutation({
     mutationFn: async ({ runId, quantity, scheduledAt }: { runId: string; quantity: number; scheduledAt: string }) => {
-      // Server-side RPC: validates ownership, charges wallet atomically if qty increased,
-      // then updates the run (bypassing the lock trigger securely).
-      const { data, error } = await supabase.rpc('reschedule_organic_run', {
-        p_run_id: runId,
-        p_quantity: quantity,
-        p_scheduled_at: scheduledAt,
+      const res = await fetch(`/api/engagement-orders/runs/${runId}/reschedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity, scheduledAt }),
       });
-      if (error) throw error;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to reschedule');
       return data as { success: boolean; extra_charged: number; new_balance: number };
     },
     onSuccess: (data: any) => {

@@ -127,23 +127,13 @@ export default function EngagementOrder() {
     } catch { /* ignore */ }
   }, []);
 
-  // Realtime: invalidate bundles when admin updates price_per_k or bundle items
+  // Bundle cache invalidated on a 5-min interval (realtime removed — no Supabase dependency)
   useEffect(() => {
-    const channel = supabase
-      .channel('user-bundles-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bundle_items' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['bundles'] });
-        queryClient.invalidateQueries({ queryKey: ['all-bundles-with-items'] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_bundles' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['bundles'] });
-        queryClient.invalidateQueries({ queryKey: ['all-bundles-with-items'] });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'services' }, () => {
-        queryClient.invalidateQueries({ queryKey: ['bundles'] });
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const id = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ['bundles'] });
+      queryClient.invalidateQueries({ queryKey: ['all-bundles-with-items'] });
+    }, 5 * 60 * 1000);
+    return () => clearInterval(id);
   }, [queryClient]);
 
 

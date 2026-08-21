@@ -1,7 +1,6 @@
 import { igImageUrl } from "@/lib/igImage";
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Grid3x3, ExternalLink, Rocket, PlayCircle, Image as ImageIcon, Layers, Instagram, History } from 'lucide-react';
@@ -103,9 +102,10 @@ export default function MyPosts() {
   const { data: accounts = [] } = useQuery({
     queryKey: igQueryKeys.accounts(user?.id),
     queryFn: async () => {
-      const { data, error } = await supabase.from('instagram_accounts').select('id,username').eq('user_id', user!.id).order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as any[];
+      const res = await fetch('/api/instagram/accounts');
+      if (!res.ok) return [] as any[];
+      const data = await res.json();
+      return (Array.isArray(data) ? data : (data.accounts ?? [])) as any[];
     },
     enabled: !!user?.id,
   });
@@ -116,24 +116,20 @@ export default function MyPosts() {
     setRefreshing(true);
     (async () => {
       try {
-        await supabase.functions.invoke('instagram-refresh-media', { body: { account_id: selectedAccountId } });
+        await fetch('/api/instagram/refresh-media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account_id: selectedAccountId }) });
         qc.invalidateQueries({ queryKey: igQueryKeys.postsSummary() });
       } catch { /* silent */ }
       finally { setRefreshing(false); }
     })();
   }, [selectedAccountId, qc]);
 
-  // realtime: any engagement order change or new IG media → refetch
+  // Poll for engagement order updates (realtime removed)
   useEffect(() => {
     if (!user?.id) return;
-    const ch = supabase
-      .channel(`eo-mypost-${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_orders', filter: `user_id=eq.${user.id}` },
-        () => qc.invalidateQueries({ queryKey: igQueryKeys.postsSummary() }))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'instagram_media', filter: `user_id=eq.${user.id}` },
-        () => qc.invalidateQueries({ queryKey: igQueryKeys.postsSummary() }))
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    const id = setInterval(() => {
+      qc.invalidateQueries({ queryKey: igQueryKeys.postsSummary() });
+    }, 10000);
+    return () => clearInterval(id);
   }, [user?.id, qc]);
 
 

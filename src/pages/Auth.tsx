@@ -4,7 +4,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Mail, Loader2, ArrowLeft, Eye, EyeOff, ArrowRight } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { z } from 'zod';
 import logo from '@/assets/logo.jpg';
 import { PageMeta } from '@/components/seo/PageMeta';
@@ -53,8 +52,13 @@ export default function Auth() {
       if (!trimmedEmail || !z.string().email().safeParse(trimmedEmail).success) {
         setError('Please enter a valid email address'); setIsSubmitting(false); return;
       }
-      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, { redirectTo: `${window.location.origin}/auth` });
-      if (error) setError(error.message); else setSuccessMessage('Password reset email sent! Check your inbox.');
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) setError(data.error || 'Something went wrong.'); else setSuccessMessage('Password reset email sent! Check your inbox.');
     } catch { setError('Something went wrong.'); }
     finally { setIsSubmitting(false); }
   };

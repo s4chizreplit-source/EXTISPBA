@@ -3,7 +3,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Rocket, Loader2 } from "lucide-react";
 
@@ -25,12 +24,14 @@ export function QuickOrderSheet({ open, onOpenChange, link, onPlaced }: QuickOrd
     if (!link) return toast.error("Missing link");
     setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke("instagram-place-engagement", {
-        body: { link, views, likes, comments, drip_minutes: drip, source: "web" },
+      const res = await fetch('/api/engagement-orders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link, views, likes, comments, drip_minutes: drip, source: "web" }),
       });
-      if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      toast.success(`Order #${(data as any).order_number} placed · ₹${(data as any).charged_inr}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to place order');
+      toast.success(`Order #${data.order_number} placed · ₹${data.charged_inr}`);
       onOpenChange(false);
       onPlaced?.();
     } catch (e: any) {

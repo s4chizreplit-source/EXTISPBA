@@ -3,7 +3,6 @@ import { Shield, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
 interface Props {
@@ -30,19 +29,29 @@ export function AutoRefillToggle({ itemId, orderId, enabled, threshold, maxRefil
     auto_refill_threshold_pct?: number;
     auto_refill_max?: number;
   };
+
   const save = async (patch: RefillPatch) => {
     if (!id) return;
     setBusy(true);
-    const q = itemId
-      ? supabase.from("engagement_order_items").update(patch).eq("id", id)
-      : supabase.from("orders").update(patch).eq("id", id);
-    const { error } = await q;
-    setBusy(false);
-    if (error) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
-      return;
+    try {
+      const url = itemId
+        ? `/api/engagement-orders/items/${itemId}/refill`
+        : `/api/orders/${orderId}/refill`;
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error || 'Save failed');
+      }
+      onUpdated?.();
+    } catch (err: any) {
+      toast({ title: "Save failed", description: err.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
     }
-    onUpdated?.();
   };
 
   return (

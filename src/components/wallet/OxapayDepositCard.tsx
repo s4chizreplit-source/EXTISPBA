@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Bitcoin, Loader2 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
 import { useCurrency } from '@/hooks/useCurrency';
 
 const QUICK_AMOUNTS = [500, 1000, 5000, 10000];
@@ -45,7 +44,8 @@ export default function OxapayDepositCard() {
     while (Date.now() - start < MAX_MS) {
       if (!mountedRef.current) { toast.dismiss(`ox-${orderId}`); return; }
       try {
-        const { data } = await supabase.functions.invoke('oxapay-sync-deposit', { body: { order_id: orderId } });
+        const _res = await fetch('/api/oxapay/sync-deposit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_id: orderId }) });
+        const data = _res.ok ? await _res.json() : null;
         if (!mountedRef.current) { toast.dismiss(`ox-${orderId}`); return; }
         if (data?.credited || data?.status === 'success') {
           toast.success('🎉 Wallet credited!', { id: `ox-${orderId}` });
@@ -69,8 +69,9 @@ export default function OxapayDepositCard() {
     if (inr > MAX_AMOUNT) return toast.error(`Maximum is ₹${MAX_AMOUNT}`);
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('oxapay-create-wallet-topup', { body: { amount_inr: inr } });
-      if (error) throw error;
+      const _res = await fetch('/api/oxapay/create-wallet-topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount_inr: inr }) });
+      const data = await _res.json();
+      if (!_res.ok) throw new Error(data?.error || 'Payment service unavailable');
       if (!data?.payment_url) throw new Error(data?.error || 'No payment URL');
       window.location.href = data.payment_url;
     } catch (e: any) {

@@ -1,7 +1,6 @@
 import { igImageUrl } from "@/lib/igImage";
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Instagram, Loader2, Plus, Trash2, CheckCircle2, ShieldAlert, Lock, RefreshCw } from 'lucide-react';
@@ -17,11 +16,10 @@ export default function InstagramPage() {
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: igQueryKeys.accounts(user?.id),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('instagram_accounts').select('*')
-        .eq('user_id', user!.id).order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
+      const res = await fetch('/api/instagram/accounts');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.accounts ?? []);
     },
     enabled: !!user?.id,
     // While a freshly linked row is still being scraped, poll so the profile
@@ -36,33 +34,23 @@ export default function InstagramPage() {
     queryKey: igQueryKeys.linkEvents(user?.id),
     queryFn: async () => {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { data, error } = await supabase
-        .from('instagram_link_events')
-        .select('username, created_at')
-        .eq('user_id', user!.id)
-        .eq('event_type', 'link')
-        .gte('created_at', since)
-        .order('created_at', { ascending: true });
-      if (error) throw error;
-      return data;
+      const res = await fetch(`/api/instagram/link-events?since=${since}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.events ?? []);
     },
     enabled: !!user?.id,
   });
 
   const linkMut = useMutation({
     mutationFn: async (u: string) => {
-      const { data, error } = await supabase.functions.invoke('instagram-link-account', { body: { username: u } });
-      if (error) {
-        // Parse the actual server error body (functions.invoke returns non-2xx as generic error)
-        let msg = error.message;
-        try {
-          const ctx: any = (error as any).context;
-          if (ctx?.json) { const j = await ctx.json(); if (j?.error) msg = j.error; }
-          else if (ctx?.text) { const t = await ctx.text(); const j = JSON.parse(t); if (j?.error) msg = j.error; }
-        } catch { /* ignore */ }
-        throw new Error(msg);
-      }
-      if (data?.error) throw new Error(data.error);
+      const res = await fetch('/api/instagram/link-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to link account');
       return data;
     },
     onSuccess: (d) => {
@@ -83,10 +71,13 @@ export default function InstagramPage() {
 
   const refreshMut = useMutation({
     mutationFn: async (accountId: string) => {
-      const { data, error } = await supabase.functions.invoke('instagram-refresh-media', {
-        body: { account_id: accountId, source: 'manual' },
+      const res = await fetch('/api/instagram/refresh-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId, source: 'manual' }),
       });
-      if (error) throw error;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to refresh');
       return data;
     },
     onSuccess: () => {
@@ -100,8 +91,8 @@ export default function InstagramPage() {
 
   const removeMut = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('instagram_accounts').delete().eq('id', id);
-      if (error) throw error;
+      const res = await fetch(`/api/instagram/accounts/${id}`, { method: 'DELETE' });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to remove'); }
     },
     onSuccess: () => {
       toast.success('Account removed');

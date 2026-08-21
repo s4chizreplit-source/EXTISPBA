@@ -6,7 +6,6 @@ import {
   Eye, Heart, MessageCircle, Bookmark, Share2,
   Clock, Play, CheckCircle2, XCircle, Pencil, Timer, RefreshCw, Loader2, TrendingUp, CalendarClock
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { useState } from "react";
 import { toast } from "sonner";
 import { isTargetMetAutoCompleted, shouldHideRunFromUser, getUserFacingRunReason } from "@/lib/run-status";
@@ -154,12 +153,8 @@ export function MergedTimeline({ runs, onEditRun, nextRun, onRefresh, typeTarget
   const refreshRunStatus = async (runId: string) => {
     setRefreshingRunId(runId);
     try {
-      const { data, error } = await supabase.functions.invoke('check-order-status', {
-        body: { runId }
-      });
-
-      if (error) throw error;
-
+      const res = await fetch(`/api/engagement-orders/runs/${runId}/check-status`, { method: 'POST' });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
       toast.success('Status updated from provider!');
       onRefresh?.();
     } catch (err: any) {
@@ -173,11 +168,10 @@ export function MergedTimeline({ runs, onEditRun, nextRun, onRefresh, typeTarget
   const refreshAllStatus = async () => {
     setIsGlobalRefreshing(true);
     try {
-      const { data, error } = await supabase.functions.invoke('check-order-status');
-
-      if (error) throw error;
-
-      toast.success(`Checked ${data?.completed + data?.stillProcessing || 0} runs from provider`);
+      const res = await fetch('/api/engagement-orders/runs/check-all-status', { method: 'POST' });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
+      const data = await res.json();
+      toast.success(`Checked ${(data?.completed ?? 0) + (data?.stillProcessing ?? 0)} runs from provider`);
       onRefresh?.();
     } catch (err: any) {
       toast.error(`Failed to refresh: ${err.message}`);

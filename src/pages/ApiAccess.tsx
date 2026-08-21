@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
@@ -22,9 +21,7 @@ import {
     AlertCircle,
 } from 'lucide-react';
 
-// Detect Supabase project URL for showing API base URL
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://YOUR_PROJECT.supabase.co';
-const API_BASE = `${SUPABASE_URL}/functions/v1/public-api`;
+const API_BASE = `${typeof window !== 'undefined' ? window.location.origin : ''}/api`;
 
 function generateApiKey(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -46,12 +43,12 @@ export default function ApiAccess() {
         setIsGenerating(true);
         try {
             const newKey = generateApiKey();
-            const { error } = await supabase
-                .from('profiles')
-                .update({ api_key: newKey })
-                .eq('user_id', user.id);
-
-            if (error) throw error;
+            const res = await fetch('/api/auth/api-key', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ apiKey: newKey }),
+            });
+            if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
             await refreshProfile();
             toast.success('API Key generated successfully!');
             setShowKey(true);

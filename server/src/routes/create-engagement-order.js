@@ -445,4 +445,79 @@ router.post('/create', requireAuth, ah(async (req, res) => {
   });
 }));
 
+// PATCH /items/:itemId/refill — update auto_refill settings on engagement_order_items
+router.patch('/items/:itemId/refill', requireAuth, ah(async (req, res) => {
+  const allowed = ['auto_refill_enabled', 'auto_refill_threshold_pct', 'auto_refill_max'];
+  const patch = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'No valid fields' });
+  const setClauses = Object.keys(patch).map((k, i) => `${k} = $${i + 2}`).join(', ');
+  await query(
+    `UPDATE engagement_order_items SET ${setClauses} WHERE id = $1`,
+    [req.params.itemId, ...Object.values(patch)]
+  );
+  res.json({ ok: true });
+}));
+
+// POST /runs/:runId/check-status — return current DB status (cron keeps it updated every 15s)
+router.post('/runs/:runId/check-status', requireAuth, ah(async (req, res) => {
+  const { rows } = await query(
+    `SELECT ors.status, ors.provider_order_id, ors.provider_status,
+            ors.provider_start_count, ors.provider_remains, ors.error_message,
+            ors.last_status_check
+     FROM organic_run_schedule ors
+     JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
+     JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+     WHERE ors.id = $1 AND eo.user_id = $2`,
+    [req.params.runId, req.session.userId]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Run not found' });
+  res.json({ ok: true, run: rows[0] });
+}));
+
+// POST /runs/check-all-status — aggregate counts for the current user
+router.post('/runs/check-all-status', requireAuth, ah(async (req, res) => {
+  const { rows } = await query(
+    `SELECT ors.status, COUNT(*)::int as count
+     FROM organic_run_schedule ors
+     JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
+     JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+     WHERE eo.user_id = $1
+     GROUP BY ors.status`,
+    [req.session.userId]
+  );
+  const counts = Object.fromEntries(rows.map(r => [r.status, r.count]));
+  res.json({
+    completed: counts.completed || 0,
+    stillProcessing: counts.processing || 0,
+    pending: counts.pending || 0,
+  });
+}));
+
+// POST /runs/:runId/reschedule — update a pending run's quantity and scheduled time
+router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
+  const { quantity, scheduledAt } = req.body || {};
+  if (!quantity || !scheduledAt) return res.status(400).json({ error: 'quantity and scheduledAt required' });
+
+  const { rows } = await query(
+    `SELECT ors.id, ors.status, ors.quantity_to_send, eo.user_id
+     FROM organic_run_schedule ors
+     JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
+     JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+     WHERE ors.id = $1`,
+    [req.params.runId]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'Run not found' });
+  const run = rows[0];
+  if (run.user_id !== req.session.userId && req.session.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (run.status !== 'pending') return res.status(400).json({ error: 'Only pending runs can be rescheduled' });
+
+  await query(
+    `UPDATE organic_run_schedule SET quantity_to_send = $1, scheduled_at = $2 WHERE id = $3`,
+    [Number(quantity), scheduledAt, req.params.runId]
+  );
+  res.json({ success: true, extra_charged: 0, new_balance: 0 });
+}));
+
 export default router;

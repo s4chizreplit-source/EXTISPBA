@@ -20,6 +20,7 @@ import createEngagementOrderRoutes from './routes/create-engagement-order.js';
 import zapupiRoutes from './routes/zapupi.js';
 import bundleRoutes from './routes/bundles.js';
 import userAdminRoutes from './routes/users.js';
+import stubRoutes from './routes/stubs.js';
 import { startCron } from './cron.js';
 import { seedAuthUsers } from './seeds/seedAuthUsers.js';
 import { seedAllData } from './seeds/seedAllData.js';
@@ -92,6 +93,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/engagement-orders', createEngagementOrderRoutes);
 app.use('/api/engagement-orders', engagementOrderRoutes);
 app.use('/api/zapupi', zapupiRoutes);
+app.use('/api', stubRoutes);
 
 // ─── Public (user-facing) bundles endpoint ────────────────────────────────
 app.get('/api/bundles', requireAuth, ah(async (req, res) => {

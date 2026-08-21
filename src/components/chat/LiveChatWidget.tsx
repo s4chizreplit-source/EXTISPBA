@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -242,42 +241,22 @@ export function LiveChatWidget() {
     queryFn: async () => {
       if (!conversation) return [];
 
-      const { data, error } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('conversation_id', conversation.id)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-      return data as ChatMessage[];
+      const res = await fetch(`/api/chat/messages?conversation_id=${conversation.id}`);
+      if (!res.ok) return [] as ChatMessage[];
+      const data = await res.json();
+      return (Array.isArray(data) ? data : (data.messages ?? [])) as ChatMessage[];
     },
     enabled: !!conversation,
     refetchOnWindowFocus: false,
   });
 
-  // Subscribe to realtime messages
+  // Poll for new messages every 5 seconds (realtime removed)
   useEffect(() => {
     if (!conversation) return;
-
-    const channel = supabase
-      .channel(`chat-${conversation.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `conversation_id=eq.${conversation.id}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['chat-messages', conversation.id] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const id = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ['chat-messages', conversation.id] });
+    }, 5000);
+    return () => clearInterval(id);
   }, [conversation?.id, queryClient]);
 
   // Auto scroll to bottom
@@ -292,14 +271,12 @@ export function LiveChatWidget() {
     mutationFn: async (text: string) => {
       if (!user || !conversation) throw new Error('Not ready');
 
-      const { error } = await supabase.from('chat_messages').insert({
-        conversation_id: conversation.id,
-        sender_id: user.id,
-        sender_role: 'user',
-        message: text.trim(),
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: conversation.id, message: text.trim() }),
       });
-
-      if (error) throw error;
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
     },
     onSuccess: () => {
       setMessage('');

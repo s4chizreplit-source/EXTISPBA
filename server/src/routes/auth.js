@@ -225,4 +225,55 @@ router.post(
   })
 );
 
+// PATCH /profile — update full_name
+router.patch(
+  '/profile',
+  requireAuth,
+  validate(z.object({ fullName: z.string().trim().min(1).max(120) })),
+  ah(async (req, res) => {
+    await query(
+      `UPDATE profiles SET full_name = $1, updated_at = now() WHERE user_id = $2`,
+      [req.valid.fullName, req.session.userId]
+    );
+    res.json({ ok: true });
+  })
+);
+
+// POST /change-password
+router.post(
+  '/change-password',
+  requireAuth,
+  validate(z.object({
+    currentPassword: z.string().min(1).max(512),
+    newPassword: z.string().min(8).max(512),
+  })),
+  ah(async (req, res) => {
+    const { currentPassword, newPassword } = req.valid;
+    const { rows } = await query(
+      'SELECT encrypted_password FROM auth_users WHERE id = $1',
+      [req.session.userId]
+    );
+    if (!rows[0]) return res.status(401).json({ error: 'User not found' });
+    const ok = await bcrypt.compare(currentPassword, rows[0].encrypted_password);
+    if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
+    const hash = await bcrypt.hash(newPassword, 12);
+    await query('UPDATE auth_users SET encrypted_password = $1 WHERE id = $2', [hash, req.session.userId]);
+    res.json({ ok: true });
+  })
+);
+
+// PATCH /api-key — save new api key to profiles
+router.patch(
+  '/api-key',
+  requireAuth,
+  validate(z.object({ apiKey: z.string().min(10).max(200) })),
+  ah(async (req, res) => {
+    await query(
+      `UPDATE profiles SET api_key = $1, updated_at = now() WHERE user_id = $2`,
+      [req.valid.apiKey, req.session.userId]
+    );
+    res.json({ ok: true });
+  })
+);
+
 export default router;

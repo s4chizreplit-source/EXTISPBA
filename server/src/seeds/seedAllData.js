@@ -5,7 +5,6 @@
 import { query } from '../db.js';
 import { PROFILES_SEED } from './profilesSeed.js';
 import { WALLETS_SEED } from './walletsSeed.js';
-import { ENG_ORDERS_SEED } from './engOrdersSeed.js';
 import { BUNDLES_SEED } from './bundlesSeed.js';
 import { BUNDLE_ITEMS_SEED } from './bundleItemsSeed.js';
 
@@ -108,62 +107,17 @@ export async function seedAllData() {
   );
 
   // ── Engagement Orders ─────────────────────────────────────────────────────
-  await seedTable(
-    'engagement_orders', ENG_ORDERS_SEED,
-    `SELECT COUNT(*)::int AS cnt FROM public.engagement_orders`,
-    async (batch) => {
-      const res = await query(
-        `INSERT INTO public.engagement_orders
-           (id, user_id, link, base_quantity, total_price, status, created_at)
-         VALUES ${buildValues(batch, 7)}`,
-        batch.flatMap(r => [
-          r.id, r.user_id, r.link, r.base_quantity,
-          r.total_price, r.status || 'completed', r.created_at,
-        ])
-      );
-      return res.rowCount || 0;
-    }
-  );
-
-  // ── Post-seed cleanup ─────────────────────────────────────────────────────
-
-  // 1. Mark stuck "processing" VPS historical orders as "partial".
+  // NOTE: VPS order history intentionally NOT re-seeded (user requested clean slate).
+  // Sequence starts at 3800 so new orders don't collide with VPS order numbers.
   try {
-    const { rowCount: r1 } = await query(`
-      UPDATE public.engagement_orders
-      SET    status = 'partial'
-      WHERE  status = 'processing'
-        AND  order_number <= 2695
-    `);
-    if (r1 > 0) console.log(`[seed] cleanup: ${r1} VPS orders → partial`);
-  } catch (e) {
-    console.error('[seed] status cleanup failed:', e.message);
-  }
-
-  // 2. Shift VPS order timestamps 90 days into the past so new production
-  //    orders always sort above them (API sorts by created_at DESC).
-  try {
-    const { rowCount: r2 } = await query(`
-      UPDATE public.engagement_orders
-      SET    created_at = created_at - INTERVAL '90 days'
-      WHERE  order_number <= 2695
-        AND  created_at > NOW() - INTERVAL '7 days'
-    `);
-    if (r2 > 0) console.log(`[seed] cleanup: shifted ${r2} VPS orders 90 days back`);
-  } catch (e) {
-    console.error('[seed] timestamp shift failed:', e.message);
-  }
-
-  // 3. Advance order_number sequence so next real production order >= 3800.
-  try {
-    const { rows } = await query(`SELECT MAX(order_number) AS mx FROM public.engagement_orders`);
-    const maxOn = Number(rows[0]?.mx ?? 0);
-    if (maxOn < 3800) {
+    const { rows } = await query(`SELECT last_value FROM engagement_orders_order_number_seq`);
+    const cur = Number(rows[0]?.last_value ?? 1);
+    if (cur < 3800) {
       await query(`SELECT setval('engagement_orders_order_number_seq', 3800, false)`);
-      console.log(`[seed] sequence: advanced to 3800 (was ${maxOn})`);
+      console.log(`[seed] sequence: ensured >= 3800 (was ${cur})`);
     }
   } catch (e) {
-    console.error('[seed] sequence advance failed:', e.message);
+    console.error('[seed] sequence check failed:', e.message);
   }
 
   console.log('[seed] VPS data seed complete.');

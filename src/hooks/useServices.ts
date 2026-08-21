@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useGlobalMarkup } from './useGlobalMarkup';
 import type { Service } from '@/lib/supabase';
 
@@ -44,14 +43,10 @@ export function useServices() {
       const cached = getCachedServices();
       if (cached) return cached;
 
-      const { data, error } = await supabase
-        .from('services')
-        .select('*')
-        .eq('is_active', true)
-        .order('category', { ascending: true });
-      
-      if (error) throw error;
-      const services = data as Service[];
+      const res = await fetch('/api/services');
+      if (!res.ok) throw new Error('Failed to fetch services');
+      const payload = await res.json();
+      const services = (Array.isArray(payload) ? payload : (payload.services ?? [])) as Service[];
       setCachedServices(services);
       return services;
     },

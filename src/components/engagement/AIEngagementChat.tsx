@@ -103,15 +103,19 @@ export function AIEngagementChat({ link, platform, engagements, totalQuantity }:
     setMessages(newMsgs);
     setInput("");
     setLoading(true);
-    const { data, error } = await supabase.functions.invoke("ai-speed-recommender", {
-      body: { link, platform: detectedPlatform.toLowerCase(), perType, messages: newMsgs },
-    });
-    setLoading(false);
-    if (error || data?.error) {
-      toast({ title: "AI error", description: error?.message || data?.error, variant: "destructive" });
-      return;
+    try {
+      const res = await fetch('/api/ai/speed-recommender', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link, platform: detectedPlatform.toLowerCase(), perType, messages: newMsgs }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'AI service unavailable');
+      setMessages([...newMsgs, { role: "assistant", content: data?.reply || "(empty reply)" }]);
+    } catch (e: any) {
+      toast({ title: "AI error", description: e.message, variant: "destructive" });
     }
-    setMessages([...newMsgs, { role: "assistant", content: data?.reply || "(empty reply)" }]);
+    setLoading(false);
     setTimeout(() => inputRef.current?.focus(), 50);
   };
 

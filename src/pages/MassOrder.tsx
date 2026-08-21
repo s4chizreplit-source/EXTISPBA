@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useNavigate, Link as RouterLink } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useGlobalMarkup } from "@/hooks/useGlobalMarkup";
@@ -342,9 +341,10 @@ export default function MassOrder() {
         METRIC_KEYS.forEach((k) => { if (c.metrics[k]?.enabled) pushType(k, c.metrics[k].qty); });
         const totalPrice = engagements.reduce((s, e) => s + e.price, 0);
 
-        const { data, error } = await supabase.functions.invoke("process-engagement-order", {
-          body: {
-            user_id: user.id,
+        const res = await fetch('/api/engagement-orders/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             bundle_id: bundle.id,
             link: c.link,
             campaign_name: campaignName.trim() || null,
@@ -352,51 +352,45 @@ export default function MassOrder() {
             total_price: totalPrice,
             is_organic_mode: true,
             engagements,
-          },
+          }),
         });
-
-        if (error) {
-          let message = (error as any)?.message || "Order failed";
-          const ctx = (error as any)?.context;
-          if (ctx && typeof ctx.text === "function") {
-            try {
-              const text = await ctx.text();
-              const parsed = JSON.parse(text);
-              message = parsed?.error || parsed?.message || text;
-            } catch { /* ignore */ }
-          }
-          throw new Error(message);
-        }
-        if ((data as any)?.error) throw new Error((data as any).error);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Order failed');
 
         okCount++;
         if (itemRow) {
-          await supabase.from("mass_order_batch_items").update({
-            status: "success",
-            engagement_order_id: (data as any)?.order_id,
-            engagement_order_number: (data as any)?.order_number,
-          }).eq("id", itemRow.id);
+          await fetch(`/api/mass-orders/batch-items/${itemRow.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'success', engagement_order_id: data?.id, engagement_order_number: data?.order_number }),
+          }).catch(() => {});
         }
       } catch (e: any) {
         failCount++;
         if (itemRow) {
-          await supabase.from("mass_order_batch_items").update({
-            status: "failed",
-            error_message: e?.message?.slice(0, 500) || "Failed",
-          }).eq("id", itemRow.id);
+          await fetch(`/api/mass-orders/batch-items/${itemRow.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'failed', error_message: (e?.message || 'Failed').slice(0, 500) }),
+          }).catch(() => {});
         }
       }
 
       setProgress({ done: i + 1, total: cards.length });
-      await supabase.from("mass_order_batches").update({
-        success_count: okCount,
-        failed_count: failCount,
-      }).eq("id", batchRow.id);
+      await fetch(`/api/mass-orders/batches/${batchRow.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ success_count: okCount, failed_count: failCount }),
+      }).catch(() => {});
       refreshWallet();
     }
 
     const finalStatus = failCount === 0 ? "completed" : okCount === 0 ? "failed" : "partial";
-    await supabase.from("mass_order_batches").update({ status: finalStatus }).eq("id", batchRow.id);
+    await fetch(`/api/mass-orders/batches/${batchRow.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: finalStatus }),
+    }).catch(() => {});
 
     setSubmitting(false);
     queryClient.invalidateQueries({ queryKey: ["mass-order-batches"] });
@@ -417,7 +411,8 @@ export default function MassOrder() {
 
   // ---------- CSV download ----------
   const downloadBatchCsv = async (batchId: string, batchName: string) => {
-    const { data } = await supabase.from("mass_order_batch_items").select("*").eq("batch_id", batchId).order("created_at");
+    const _r = await fetch(`/api/mass-orders/batch-items?batch_id=${batchId}`).catch(() => null);
+    const data = _r?.ok ? await _r.json() : null;
     if (!data || data.length === 0) {
       toast({ title: "Empty batch", variant: "destructive" });
       return;

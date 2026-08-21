@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -105,48 +104,9 @@ export default function Settings() {
     } catch { /* ignore parse errors */ }
   }, [profile]);
 
-  // Handle photo upload
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-
-    if (file.size > 2 * 1024 * 1024) {
-      toast({ title: 'File too large', description: 'Max 2MB allowed', variant: 'destructive' });
-      return;
-    }
-
-    setUploadingPhoto(true);
-    try {
-      // Upload to Supabase Storage (avatars bucket)
-      const ext = file.name.split('.').pop();
-      const path = `${user.id}/avatar.${ext}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(path, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
-      const publicUrl = urlData.publicUrl + '?t=' + Date.now();
-
-      // Save URL to profile
-      const { error: updateError } = await (supabase as any)
-        .from('profiles')
-        .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
-        .eq('user_id', user.id);
-
-      if (updateError) throw updateError;
-
-      setAvatarUrl(publicUrl);
-      toast({ title: '📸 Photo Updated!', description: 'Profile photo saved successfully.' });
-      refreshProfile();
-    } catch (err: any) {
-      toast({ title: 'Upload Failed', description: err.message || 'Could not upload photo', variant: 'destructive' });
-    } finally {
-      setUploadingPhoto(false);
-    }
+  // Handle photo upload — file storage not configured, show coming soon
+  const handlePhotoUpload = async (_e: React.ChangeEvent<HTMLInputElement>) => {
+    toast({ title: 'Coming Soon', description: 'Avatar upload will be available in the next update.', variant: 'default' });
   };
 
   // Redirect if not authenticated
@@ -168,30 +128,24 @@ export default function Settings() {
       }));
     } catch { /* ignore storage errors */ }
 
-    // Only update fields that exist in the DB
-    supabase
-      .from('profiles')
-      .update({
-        full_name: fullName.trim(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', user.id)
-      .then(({ error }) => {
-        setIsSaving(false);
-        if (error) {
-          toast({
-            title: "Error",
-            description: "Failed to update profile",
-            variant: "destructive",
-          });
-        } else {
-          toast({
-            title: "Settings Saved",
-            description: "Your preferences have been updated successfully.",
-          });
-        }
-        refreshProfile();
-      });
+    // Update profile via REST API
+    fetch('/api/auth/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName: fullName.trim() }),
+    }).then(async (res) => {
+      setIsSaving(false);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast({ title: "Error", description: d.error || "Failed to update profile", variant: "destructive" });
+      } else {
+        toast({ title: "Settings Saved", description: "Your preferences have been updated successfully." });
+      }
+      refreshProfile();
+    }).catch(() => {
+      setIsSaving(false);
+      toast({ title: "Error", description: "Failed to update profile", variant: "destructive" });
+    });
   };
 
   const updateRatio = (key: keyof typeof ratios, value: number) => {
@@ -236,15 +190,14 @@ export default function Settings() {
     setConfirmPassword('');
 
     // Fire-and-forget: Process in background
-    supabase.auth.updateUser({
-      password: newPassword,
-    }).then(({ error }) => {
-      if (error) {
-        toast({
-          title: "Error",
-          description: "Password update failed: " + error.message,
-          variant: "destructive",
-        });
+    fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast({ title: "Error", description: "Password update failed: " + (d.error || 'Unknown error'), variant: "destructive" });
       }
     });
   };
@@ -262,22 +215,15 @@ export default function Settings() {
     });
 
     // Fire-and-forget: Process in background
-    supabase
-      .from('profiles')
-      .update({
-        api_key: newKey,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', user.id)
-      .then(({ error }) => {
-        if (error) {
-          toast({
-            title: "Error",
-            description: "Failed to save API key - please refresh",
-            variant: "destructive",
-          });
-        }
-        refreshProfile();
+    fetch('/api/auth/api-key', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: newKey }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        toast({ title: "Error", description: "Failed to save API key - please refresh", variant: "destructive" });
+      }
+      refreshProfile();
       });
   };
 

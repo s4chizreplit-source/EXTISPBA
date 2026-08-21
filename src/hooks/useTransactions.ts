@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 
 export type TransactionFilter = 'all' | 'deposit' | 'withdrawal' | 'order' | 'refund';
@@ -10,20 +9,14 @@ export function useTransactions(filter: TransactionFilter = 'all') {
   return useQuery({
     queryKey: ['transactions', user?.id, filter],
     queryFn: async () => {
-      let query = supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user!.id)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (filter !== 'all') {
-        query = query.eq('type', filter);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data;
+      const params = new URLSearchParams({ type: filter === 'withdrawal' ? 'all' : filter, limit: '50' });
+      const res = await fetch(`/api/wallet/transactions?${params}`);
+      if (!res.ok) throw new Error('Failed to fetch transactions');
+      const data = await res.json();
+      const txns = data.transactions ?? [];
+      // withdrawal is not a real type in our DB — filter client-side
+      if (filter === 'withdrawal') return txns.filter((t: any) => t.type === 'withdrawal');
+      return txns;
     },
     enabled: !!user?.id,
     staleTime: 60000,
