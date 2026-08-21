@@ -15,6 +15,23 @@ async function main() {
     )
   `);
 
+  // Databases imported from the original Supabase/VPS app use auth_users and
+  // structurally supersede the early self-hosted users/services bootstrap.
+  // Baseline those two migrations instead of trying to apply the incompatible
+  // fresh-install schema over live imported tables.
+  const { rows: [legacySchema] } = await pool.query(`
+    SELECT
+      to_regclass('public.auth_users') IS NOT NULL AS has_auth_users,
+      to_regclass('public.engagement_orders') IS NOT NULL AS has_engagement_orders
+  `);
+  if (legacySchema.has_auth_users && legacySchema.has_engagement_orders) {
+    await pool.query(`
+      INSERT INTO schema_migrations (name)
+      VALUES ('001_init.sql'), ('002_seed_services.sql')
+      ON CONFLICT (name) DO NOTHING
+    `);
+  }
+
   const applied = new Set(
     (await pool.query('SELECT name FROM schema_migrations')).rows.map((r) => r.name)
   );

@@ -96,3 +96,7 @@ NODE_ENV = "production"
 
 [userenv.shared]
 PUBLIC_APP_URL = "https://extipspanel.com"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000
