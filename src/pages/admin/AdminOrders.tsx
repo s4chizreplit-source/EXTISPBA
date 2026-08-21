@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +38,13 @@ import {
 import { Link, Navigate } from 'react-router-dom';
 import type { OrganicRun } from '@/lib/supabase';
 
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: 'include', ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
+
 export default function AdminOrders() {
   const { isAdmin, isLoading: authLoading } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,12 +55,12 @@ export default function AdminOrders() {
 
   const cancelOrderMutation = useMutation({
     mutationFn: async (orderId: string) => {
-      const { data, error } = await supabase.functions.invoke('cancel-order', {
-        body: { order_id: orderId }
+      const data = await apiFetch(`/api/admin/orders/${orderId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      return data;
+      return data as { refundAmount?: number; refundedQuantity?: number };
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['admin-all-orders'] });
@@ -76,14 +82,15 @@ export default function AdminOrders() {
   const { data: orders, isLoading } = useQuery({
     queryKey: ['admin-all-orders'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*, service:services(name, category)')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (error) throw error;
-      return data;
+      const data = await apiFetch('/api/admin/orders?status=all&limit=100');
+      const rows = (data?.orders || []) as any[];
+      // Normalise flat service columns into the nested shape the UI expects.
+      return rows.map((o) => ({
+        ...o,
+        service: o.service ?? (o.service_name
+          ? { name: o.service_name, category: o.category ?? o.platform }
+          : null),
+      }));
     },
   });
 
@@ -91,14 +98,9 @@ export default function AdminOrders() {
     queryKey: ['admin-organic-runs', expandedOrder],
     queryFn: async () => {
       if (!expandedOrder) return [];
-      const { data, error } = await supabase
-        .from('organic_run_schedule')
-        .select('*')
-        .eq('order_id', expandedOrder)
-        .order('run_number', { ascending: true });
-
-      if (error) throw error;
-      return data as OrganicRun[];
+      const data = await apiFetch(`/api/admin/orders/${expandedOrder}/runs`);
+      const rows = (Array.isArray(data) ? data : data?.runs) || [];
+      return rows as OrganicRun[];
     },
     enabled: !!expandedOrder,
   });

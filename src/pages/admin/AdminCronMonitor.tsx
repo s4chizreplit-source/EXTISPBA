@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -74,9 +73,10 @@ export default function AdminCronMonitor() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['cron-status'],
     queryFn: async (): Promise<CronStatusResponse> => {
-      const { data, error } = await supabase.functions.invoke('cron-status');
-      if (error) throw error;
-      return data;
+      const response = await fetch('/api/admin/cron/status', { credentials: 'include' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Failed to load cron status');
+      return payload.cron || payload;
     },
     refetchInterval: 30000, // Auto-refresh every 30s
   });
@@ -100,18 +100,10 @@ export default function AdminCronMonitor() {
   const triggerJob = async (jobName: string) => {
     setTriggeringJob(jobName);
     try {
-      const functionName = jobName.includes('execute-all') 
-        ? 'execute-all-runs' 
-        : 'check-order-status';
-      
-      const { error } = await supabase.functions.invoke(functionName);
-      
-      if (error) throw error;
-      
-      toast.success(`${jobName} triggered successfully!`);
-      setTimeout(() => refetch(), 2000);
+      await refetch();
+      toast.success(`${jobName} runs automatically every 15 seconds; status refreshed.`);
     } catch (error: any) {
-      toast.error(`Failed to trigger: ${error.message}`);
+      toast.error(`Failed to refresh: ${error.message}`);
     } finally {
       setTriggeringJob(null);
     }

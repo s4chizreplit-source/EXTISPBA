@@ -23,6 +23,7 @@ import { query, withTx } from './db.js';
 const BATCH_SIZE        = 25;
 const TICK_MS           = 15_000;
 const STATUS_BATCH_SIZE = 50;   // how many 'processing' runs to status-check per tick
+const MIN_LIVE_ORDER_NUMBER = 3800;
 const ENV_PROVIDER_URL  = String(process.env.PROVIDER_API_URL || '').trim();
 const ENV_PROVIDER_KEY  = String(process.env.PROVIDER_API_KEY || '').trim();
 const ENV_PROVIDER_NAME = String(process.env.PROVIDER_NAME || 'Primary Provider').trim();
@@ -73,12 +74,13 @@ async function processBatch() {
        WHERE ors.status = 'pending'
          AND ors.retry_count < 3
          AND ors.scheduled_at <= now()
+          AND eo.order_number >= $2
          AND eo.status  NOT IN ('cancelled','paused','completed')
          AND eoi.status NOT IN ('cancelled','paused','completed','failed')
        ORDER BY ors.scheduled_at ASC
        LIMIT $1
        FOR UPDATE OF ors SKIP LOCKED
-    `, [BATCH_SIZE]);
+    `, [BATCH_SIZE, MIN_LIVE_ORDER_NUMBER]);
 
     if (locked.length === 0) return [];
     const ids = locked.map(r => r.id);
@@ -286,8 +288,9 @@ async function recoverSimulatedRuns() {
         JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
        WHERE ors.status = 'completed'
          AND ors.provider_order_id LIKE 'sim_%'
+          AND eo.order_number >= $1
        FOR UPDATE OF ors
-    `);
+    `, [MIN_LIVE_ORDER_NUMBER]);
     if (rows.length === 0) return 0;
 
     const runIds = rows.map(row => row.id);
@@ -345,9 +348,12 @@ async function checkProcessingRuns() {
       pa.name     AS account_name,
       COALESCE(pa.delivery_multiplier, 1) AS delivery_multiplier
     FROM organic_run_schedule ors
+    JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
+    JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
     LEFT JOIN provider_accounts pa ON pa.id = ors.provider_account_id
     WHERE ors.status = 'processing'
       AND ors.provider_order_id IS NOT NULL
+      AND eo.order_number >= $3
       AND (
         (
           pa.is_active = true
@@ -359,7 +365,7 @@ async function checkProcessingRuns() {
       AND (ors.last_status_check IS NULL OR ors.last_status_check < now() - interval '30 seconds')
     ORDER BY ors.last_status_check ASC NULLS FIRST
     LIMIT $1
-  `, [STATUS_BATCH_SIZE, HAS_ENV_PROVIDER]);
+  `, [STATUS_BATCH_SIZE, HAS_ENV_PROVIDER, MIN_LIVE_ORDER_NUMBER]);
 
   if (runs.length === 0) return;
 
@@ -514,29 +520,37 @@ export function startCron() {
 
   // Reset runs that were mid-dispatch when the server last restarted.
   query(`
-    UPDATE organic_run_schedule
+    UPDATE organic_run_schedule ors
        SET status = 'pending',
            retry_count = GREATEST(retry_count, 1),
            error_message = 'Reset: server restarted mid-dispatch',
            started_at = NULL
-     WHERE status = 'started'
-       AND started_at < now() - interval '5 minutes'
-  `).then(r => {
+      FROM engagement_order_items eoi
+      JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+     WHERE eoi.id = ors.engagement_order_item_id
+       AND eo.order_number >= $1
+       AND ors.status = 'started'
+       AND ors.started_at < now() - interval '5 minutes'
+  `, [MIN_LIVE_ORDER_NUMBER]).then(r => {
     if (r.rowCount > 0) console.log(`[cron] ♻ Reset ${r.rowCount} orphaned 'started' run(s) to pending`);
   }).catch(e => console.error('[cron] Orphan reset error:', e));
 
   // Also move any existing 'completed' runs that have no provider_status back to 'processing'
   // so the status-check loop picks them up. This handles runs placed before this fix.
   query(`
-    UPDATE organic_run_schedule
+    UPDATE organic_run_schedule ors
        SET status = 'processing',
            last_status_check = NULL
-     WHERE status = 'completed'
-       AND provider_order_id IS NOT NULL
-       AND provider_order_id NOT LIKE 'sim_%'
-       AND provider_status IS NULL
-       AND completed_at > now() - interval '7 days'
-  `).then(r => {
+      FROM engagement_order_items eoi
+      JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+     WHERE eoi.id = ors.engagement_order_item_id
+       AND eo.order_number >= $1
+       AND ors.status = 'completed'
+       AND ors.provider_order_id IS NOT NULL
+       AND ors.provider_order_id NOT LIKE 'sim_%'
+       AND ors.provider_status IS NULL
+       AND ors.completed_at > now() - interval '7 days'
+  `, [MIN_LIVE_ORDER_NUMBER]).then(r => {
     if (r.rowCount > 0) console.log(`[cron] 🔄 Re-queued ${r.rowCount} unverified run(s) for status check`);
   }).catch(e => console.error('[cron] Re-queue error:', e));
 

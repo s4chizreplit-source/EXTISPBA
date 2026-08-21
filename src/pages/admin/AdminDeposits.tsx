@@ -2,8 +2,14 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+
+async function apiFetch(path: string, opts?: RequestInit) {
+    const r = await fetch(path, { credentials: 'include', ...opts });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+    return data;
+}
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -39,128 +45,36 @@ export default function AdminDeposits() {
     const { data: deposits, isLoading } = useQuery({
         queryKey: ['admin-pending-deposits'],
         queryFn: async () => {
-            console.log('Fetching admin pending deposits...');
-
-            // Step 1: Fetch transactions (no FK join - avoids RLS issues)
-            const { data: txData, error: txError } = await supabase
-                .from('transactions')
-                .select('*')
-                .in('payment_method', ['razorpay_manual', 'usdt_bep20', 'zapupi', 'oxapay', 'razorpay_auto'])
-                .order('created_at', { ascending: false });
-
-            if (txError) {
-                console.error('Admin Deposits fetch error:', txError);
+            try {
+                const rows = await apiFetch('/api/admin/deposits');
+                const list = Array.isArray(rows) ? rows : (rows?.deposits ?? []);
+                return list.map((tx: any) => ({
+                    ...tx,
+                    profiles: tx.profiles || { email: 'Unknown', full_name: 'Unknown' },
+                }));
+            } catch (e) {
+                console.error('Admin Deposits fetch error:', e);
                 toast({
                     title: 'Database Error',
-                    description: 'Could not fetch deposits. Check your RLS permissions.',
+                    description: 'Could not fetch deposits.',
                     variant: 'destructive',
                 });
-                throw txError;
+                throw e;
             }
-
-            if (!txData || txData.length === 0) return [];
-
-            // Step 2: Fetch profiles for all unique user_ids
-            const userIds = [...new Set(txData.map(t => t.user_id))];
-            const { data: profilesData } = await (supabase as any)
-                .from('profiles')
-                .select('user_id, email, full_name, avatar_url')
-                .in('user_id', userIds);
-
-            // Step 3: Merge profiles into transactions
-            const profileMap = new Map(
-                (profilesData || []).map(p => [p.user_id, p])
-            );
-
-            const merged = txData.map(tx => ({
-                ...tx,
-                profiles: profileMap.get(tx.user_id) || { email: 'Unknown', full_name: 'Unknown' },
-            }));
-
-            console.log('Admin Deposits fetched successfully:', merged.length, 'records');
-            return merged;
         },
+        refetchInterval: 15_000,
     });
 
     const updateStatusMutation = useMutation({
-        mutationFn: async ({ id, status, userId, amount }: { id: string, status: 'completed' | 'failed', userId: string, amount: number }) => {
-
-            if (status === 'completed') {
-                // 1. Get current wallet
-                const { data: wallet } = await supabase
-                    .from('wallets')
-                    .select('balance, total_deposited')
-                    .eq('user_id', userId)
-                    .single();
-
-                if (!wallet) throw new Error('Wallet not found');
-
-                const newBalance = Number(wallet.balance) + amount;
-                const newTotal = Number(wallet.total_deposited) + amount;
-
-                // 2. Update wallet
-                const { error: walletError } = await supabase
-                    .from('wallets')
-                    .update({
-                        balance: newBalance,
-                        total_deposited: newTotal,
-                        updated_at: new Date().toISOString(),
-                    })
-                    .eq('user_id', userId);
-
-                if (walletError) throw walletError;
-
-                // 3. Update transaction
-                const { error: txError } = await supabase
-                    .from('transactions')
-                    .update({
-                        status: 'completed',
-                        balance_after: newBalance,
-                    })
-                    .eq('id', id);
-
-                if (txError) throw txError;
-            } else {
-                // Just fail the transaction
-                const { error: txError } = await supabase
-                    .from('transactions')
-                    .update({
-                        status: 'failed',
-                    })
-                    .eq('id', id);
-
-                if (txError) throw txError;
-            }
+        mutationFn: async ({ id, status }: { id: string, status: 'completed' | 'failed', userId: string, amount: number }) => {
+            const action = status === 'completed' ? 'approve' : 'reject';
+            await apiFetch(`/api/admin/deposits/${id}/${action}`, { method: 'POST' });
         },
         onSuccess: async (_, variables) => {
-            const statusText = variables.status === 'completed' ? '✅ APPROVED' : '❌ REJECTED';
-            const deposit = deposits?.find(d => d.id === variables.id);
-
             toast({
                 title: `Deposit ${variables.status === 'completed' ? 'Approved' : 'Rejected'}`,
                 description: 'The operation was processed successfully.',
             });
-
-            // Log to Telegram (with user photo if available)
-            try {
-                const profile = deposit?.profiles as any;
-                const tgMessage = `<b>${statusText}: Deposit Request</b>\n\n` +
-                    `👤 <b>User:</b> ${profile?.full_name || 'Unknown'}\n` +
-                    `📧 <b>Email:</b> ${profile?.email}\n` +
-                    `💰 <b>Amount:</b> $${variables.amount}\n` +
-                    `🆔 <b>ID:</b> <code>${deposit?.payment_reference}</code>\n` +
-                    `📅 <b>Action Date:</b> ${new Date().toLocaleString()}`;
-
-                await supabase.functions.invoke('send-telegram-notification', {
-                    body: {
-                        message: tgMessage,
-                        // Send profile photo URL if user has one
-                        ...(profile?.avatar_url ? { photo_url: profile.avatar_url } : {}),
-                    },
-                });
-            } catch (e) {
-                console.error('TG log failed:', e);
-            }
 
             queryClient.invalidateQueries({ queryKey: ['admin-pending-deposits'] });
             queryClient.invalidateQueries({ queryKey: ['admin-all-users-with-subs'] });

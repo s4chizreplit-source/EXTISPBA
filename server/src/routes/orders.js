@@ -12,7 +12,7 @@ function round4(n) {
   return Math.round(Number(n) * 10000) / 10000;
 }
 
-/** Quote: charge = quantity / 1000 * price_per_1k */
+/** Quote: charge = quantity / 1000 * service price per 1,000. */
 router.post(
   '/quote',
   requireAuth,
@@ -30,7 +30,7 @@ router.post(
         error: `Quantity must be between ${service.min_quantity} and ${service.max_quantity}`,
       });
     }
-    res.json({ charge: round4((quantity / 1000) * Number(service.price_per_1k)) });
+    res.json({ charge: round4((quantity / 1000) * Number(service.price)) });
   })
 );
 
@@ -68,7 +68,7 @@ router.post(
         throw e;
       }
 
-      const charge = round4((quantity / 1000) * Number(service.price_per_1k));
+      const charge = round4((quantity / 1000) * Number(service.price));
 
       const walletRes = await client.query(
         'SELECT balance, total_spent FROM wallets WHERE user_id = $1 FOR UPDATE',
@@ -93,15 +93,16 @@ router.post(
       );
 
       const orderRes = await client.query(
-        `INSERT INTO orders (user_id, service_id, link, quantity, charge, status)
+        `INSERT INTO orders (user_id, service_id, link, quantity, price, status)
          VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING *`,
         [userId, serviceId, link, quantity, charge]
       );
       const order = orderRes.rows[0];
 
       await client.query(
-        `INSERT INTO transactions (user_id, type, amount, balance_after, order_id, reference, description)
-         VALUES ($1, 'order', $2, $3, $4, $5, $6)`,
+        `INSERT INTO transactions
+           (user_id, type, amount, balance_after, order_id, payment_reference, description, status)
+         VALUES ($1, 'order', $2, $3, $4, $5, $6, 'completed')`,
         [
           userId,
           -charge,
@@ -117,27 +118,27 @@ router.post(
 
     // 2) Send to provider outside the transaction; failure refunds the user.
     try {
-      const { providerOrderId, raw } = await placeProviderOrder({
+      const { providerOrderId } = await placeProviderOrder({
         providerServiceId: created.service.provider_service_id,
         link,
         quantity,
       });
       const { rows } = await query(
         `UPDATE orders
-            SET status = 'processing', provider_order_id = $1, provider_response = $2, updated_at = now()
-          WHERE id = $3 RETURNING *`,
-        [providerOrderId, raw, created.order.id]
+            SET status = 'processing', provider_order_id = $1, updated_at = now()
+          WHERE id = $2 RETURNING *`,
+        [providerOrderId, created.order.id]
       );
       return res.status(201).json({ order: rows[0] });
     } catch (err) {
       await withTx(async (client) => {
         const claimed = await client.query(
           `UPDATE orders SET status = 'failed', error_message = $1, updated_at = now()
-            WHERE id = $2 AND status = 'pending' RETURNING charge`,
+            WHERE id = $2 AND status = 'pending' RETURNING price`,
           [String(err.message).slice(0, 500), created.order.id]
         );
         if (!claimed.rowCount) return;
-        const charge = Number(claimed.rows[0].charge);
+        const charge = Number(claimed.rows[0].price);
         const w = await client.query(
           'SELECT balance, total_spent FROM wallets WHERE user_id = $1 FOR UPDATE',
           [userId]
@@ -148,9 +149,12 @@ router.post(
           [newBalance, round4(Math.max(0, Number(w.rows[0].total_spent) - charge)), userId]
         );
         await client.query(
-          `INSERT INTO transactions (user_id, type, amount, balance_after, order_id, reference, description)
-           VALUES ($1, 'refund', $2, $3, $4, $5, 'Auto-refund: provider rejected order')
-           ON CONFLICT DO NOTHING`,
+          `INSERT INTO transactions
+             (user_id, type, amount, balance_after, order_id, payment_reference, description, status)
+           SELECT $1, 'refund', $2, $3, $4, $5, 'Auto-refund: provider rejected order', 'completed'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM transactions WHERE order_id = $4 AND type = 'refund'
+            )`,
           [userId, charge, newBalance, created.order.id, `refund:${created.order.id}`]
         );
       });
@@ -207,9 +211,9 @@ router.get(
           const updated = await query(
             `UPDATE orders
                 SET status = $1, start_count = COALESCE($2, start_count),
-                    remains = $3, provider_response = $4, updated_at = now()
-              WHERE id = $5 RETURNING *`,
-            [live.status, live.startCount, live.remains, live.raw, order.id]
+                    remains = $3, updated_at = now()
+              WHERE id = $4 RETURNING *`,
+            [live.status, live.startCount, live.remains, order.id]
           );
           order = { ...order, ...updated.rows[0] };
         }

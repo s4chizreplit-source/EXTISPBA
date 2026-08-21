@@ -4,7 +4,7 @@
 - [Cron design](cron-design.md) — Race condition + duplicate dispatch causes; 3-step TX fix; batch=25 tick=15s; retry_count<3 filter.
 - [Order placement migration](order-placement.md) — Order creation moved from Supabase edge function to Express REST API; table name bugs fixed; zapupi credit_wallet_zapupi stored proc replaced with direct SQL.
 - [Supabase removal](supabase-removal.md) — All non-admin Supabase client calls replaced with REST API; stub endpoints added for secondary features.
-- [Seed guard](seed-guard.md) — Engagement orders intentionally NOT re-seeded; sequence kept >= 3800; removal from seedAllData.js prevents post-truncate re-insertion.
+- [Historical order guard](seed-guard.md) — Restored VPS orders stay visible but read-only; cron only processes order numbers 3800 and newer.
 - [Production database isolation](production-db-isolation.md) — Live deployment data is separate from development; always verify production directly before declaring data fixes complete.
 - [Funds reporting baseline](funds-reporting-baseline.md) — Historical admin fund totals use a reporting baseline; never correct them by editing user wallets or ledger rows.
 - [Organic delivery policy](organic-delivery-policy.md) — Randomize only new orders; preserve exact totals; missing providers must wait and never simulate completion.

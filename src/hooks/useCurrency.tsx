@@ -1,6 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from './useAuth';
+import { createContext, useContext, useCallback, ReactNode } from 'react';
 
 const DEFAULT_RATES: Record<CurrencyCode, number> = {
   USD: 1,

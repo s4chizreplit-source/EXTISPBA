@@ -1,11 +1,16 @@
-import { useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sparkles, ArrowUpRight, Wifi, Loader2 } from 'lucide-react';
+
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: 'include', ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
 
 interface BundleItem {
   id: string;
@@ -30,45 +35,17 @@ interface Bundle {
  * yahaan turant (realtime) dikh jata hai bina refresh kiye.
  */
 export function BundlesLivePanel() {
-  const queryClient = useQueryClient();
-
+  // Polling replaces realtime subscriptions: refetch every 10s so newly
+  // added bundles / engagement types / price changes appear near-instantly.
   const { data: bundles, isLoading } = useQuery({
     queryKey: ['admin-services-bundles-live'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('engagement_bundles')
-        .select(`
-          id, name, platform, is_active, created_at,
-          items:bundle_items(
-            id, engagement_type, ratio_percent, is_base, price_per_k,
-            service:services(id, name, price)
-          )
-        `)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
+      const data = await apiFetch('/api/admin/bundles');
       return (data || []) as unknown as Bundle[];
     },
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
   });
-
-  // Realtime: any change in engagement_bundles / bundle_items / services → refetch
-  useEffect(() => {
-    const invalidate = () =>
-      queryClient.invalidateQueries({ queryKey: ['admin-services-bundles-live'] });
-
-    const channel = supabase
-      .channel('admin-bundles-services-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'engagement_bundles' }, invalidate)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bundle_items' }, invalidate)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'services' }, () => {
-        invalidate();
-        queryClient.invalidateQueries({ queryKey: ['admin-all-services'] });
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
 
   return (
     <Card className="glass-card border-2 border-primary/20">

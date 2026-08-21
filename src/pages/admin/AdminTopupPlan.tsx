@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, RefreshCw, TrendingUp, Zap, Wallet, Radio, AlertTriangle } from "lucide-react";
 
-import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +11,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: "include", ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
 
 const INR_RATE = 83.5;
 const inr = (n: number) => `₹${Math.round((n || 0) * INR_RATE).toLocaleString("en-IN")}`;
@@ -55,8 +61,6 @@ type ProviderAccount = {
   last_balance_error: string | null;
 };
 
-type PendingOrderRow = { user_id: string; total_price: number | null };
-
 export default function AdminTopupPlan() {
   const queryClient = useQueryClient();
   const [checkingAll, setCheckingAll] = useState(false);
@@ -65,9 +69,9 @@ export default function AdminTopupPlan() {
   const plan = useQuery({
     queryKey: ["topup-plan"],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_provider_topup_plan");
-      if (error) throw error;
-      return (data || []) as PlanRow[];
+      const data = await apiFetch("/api/admin/topup-plan");
+      const list = Array.isArray(data) ? data : (data?.plan ?? []);
+      return list as PlanRow[];
     },
     refetchInterval: 60_000,
   });
@@ -75,9 +79,9 @@ export default function AdminTopupPlan() {
   const breakdown = useQuery({
     queryKey: ["topup-breakdown"],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_provider_topup_breakdown");
-      if (error) throw error;
-      return (data || []) as BreakdownRow[];
+      const data = await apiFetch("/api/admin/topup-breakdown");
+      const list = Array.isArray(data) ? data : (data?.breakdown ?? []);
+      return list as BreakdownRow[];
     },
     refetchInterval: 60_000,
   });
@@ -85,80 +89,46 @@ export default function AdminTopupPlan() {
   const accounts = useQuery({
     queryKey: ["topup-provider-accounts"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("provider_accounts")
-        .select("id,provider_id,name,is_active,balance,balance_currency,balance_checked_at,last_balance_error")
-        .eq("is_active", true)
-        .order("name");
-      if (error) throw error;
-      return (data || []) as ProviderAccount[];
+      const data = await apiFetch("/api/admin/provider-accounts");
+      const list = (Array.isArray(data) ? data : (data?.accounts ?? [])) as ProviderAccount[];
+      return list.filter((a) => a.is_active).sort((a, b) => a.name.localeCompare(b.name));
     },
     refetchInterval: 60_000,
   });
 
-  // Top pending users — merged from orders + engagement_orders
+  // Top pending users — computed server-side
   const topUsers = useQuery({
     queryKey: ["topup-top-users"],
     queryFn: async () => {
-      const [o, eo] = await Promise.all([
-        supabase.from("orders").select("user_id,total_price").in("status", ["pending", "processing"]),
-        supabase.from("engagement_orders").select("user_id,total_price").in("status", ["pending", "processing"]),
-      ]);
-      const rows: PendingOrderRow[] = [...(o.data || []), ...(eo.data || [])] as PendingOrderRow[];
-      const agg = new Map<string, { user_id: string; count: number; value: number }>();
-      rows.forEach((r) => {
-        if (!r.user_id) return;
-        const cur = agg.get(r.user_id) || { user_id: r.user_id, count: 0, value: 0 };
-        cur.count += 1;
-        cur.value += Number(r.total_price || 0);
-        agg.set(r.user_id, cur);
-      });
-      const list = Array.from(agg.values()).sort((a, b) => b.value - a.value).slice(0, 5);
-      if (list.length === 0) return [];
-
-      const ids = list.map((l) => l.user_id);
-      const [profs, wals] = await Promise.all([
-        supabase.from("profiles").select("user_id,email,full_name").in("user_id", ids),
-        supabase.from("wallets").select("user_id,balance,total_deposited,total_spent").in("user_id", ids),
-      ]);
-      const pmap = new Map((profs.data || []).map((p: { user_id: string; email: string | null; full_name: string | null }) => [p.user_id, p]));
-      const wmap = new Map(
-        (wals.data || []).map((w: { user_id: string; balance: number | null; total_deposited: number | null; total_spent: number | null }) => [w.user_id, w])
-      );
-      return list.map((l) => ({
-        ...l,
-        email: pmap.get(l.user_id)?.email || "—",
-        name: pmap.get(l.user_id)?.full_name || "",
-        wallet: Number(wmap.get(l.user_id)?.balance || 0),
-        deposited: Number(wmap.get(l.user_id)?.total_deposited || 0),
-        spent: Number(wmap.get(l.user_id)?.total_spent || 0),
+      const data = await apiFetch("/api/admin/topup-users");
+      const list = Array.isArray(data) ? data : (data?.users ?? []);
+      return list.map((l: any) => ({
+        user_id: l.user_id,
+        count: Number(l.count || 0),
+        value: Number(l.value || 0),
+        email: l.email || "—",
+        name: l.name || "",
+        wallet: Number(l.wallet || 0),
+        deposited: Number(l.deposited || 0),
+        spent: Number(l.spent || 0),
       }));
     },
     refetchInterval: 60_000,
   });
 
+  // Polling replaces realtime; mark live once first plan load succeeds
   useEffect(() => {
-    const channel = supabase
-      .channel("admin-topup-live")
-      .on("postgres_changes", { event: "*", schema: "public", table: "organic_run_schedule" }, () => {
-        queryClient.invalidateQueries({ queryKey: ["topup-plan"] });
-        queryClient.invalidateQueries({ queryKey: ["topup-breakdown"] });
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "provider_accounts" }, () => {
-        queryClient.invalidateQueries({ queryKey: ["topup-provider-accounts"] });
-      })
-      .subscribe((status) => setLiveConnected(status === "SUBSCRIBED"));
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
+    setLiveConnected(plan.isSuccess);
+  }, [plan.isSuccess]);
 
   const checkAll = async () => {
     setCheckingAll(true);
     try {
-      const { data, error } = await supabase.functions.invoke("check-provider-balance", { body: { source: "manual" } });
-      if (error) throw error;
-      const res = data as { checked?: number; results?: { name: string; error?: string }[] };
+      const res = (await apiFetch("/api/admin/provider-accounts/check-balances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "manual" }),
+      })) as { checked?: number; results?: { name: string; error?: string }[] };
       const n = res?.checked ?? 0;
       const failed = (res?.results || []).filter((r) => r.error);
       // Pull the freshly written balances into the UI

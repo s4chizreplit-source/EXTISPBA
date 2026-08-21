@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -38,6 +37,13 @@ import type { Service } from '@/lib/supabase';
 import { ImportServicesDialog } from '@/components/admin/ImportServicesDialog';
 import { BundlesLivePanel } from '@/components/admin/BundlesLivePanel';
 
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: 'include', ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
+
 export default function AdminServices() {
   const { isAdmin, isLoading: authLoading } = useAuth();
   const queryClient = useQueryClient();
@@ -63,21 +69,18 @@ export default function AdminServices() {
   const { data: services, isLoading } = useQuery({
     queryKey: ['admin-all-services'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('services')
-        .select('*')
-        .order('category', { ascending: true });
-
-      if (error) throw error;
-      return data as Service[];
+      const data = await apiFetch('/api/admin/services');
+      const rows = (Array.isArray(data) ? data : data?.services) || [];
+      return rows as Service[];
     },
   });
 
   const addServiceMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from('services')
-        .insert({
+      await apiFetch('/api/admin/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           provider_service_id: formData.provider_service_id,
           name: formData.name,
           category: formData.category,
@@ -89,9 +92,8 @@ export default function AdminServices() {
           quality: formData.quality,
           drip_feed_enabled: formData.drip_feed_enabled,
           is_active: formData.is_active,
-        });
-
-      if (error) throw error;
+        }),
+      });
     },
     onSuccess: () => {
       toast.success('Service added successfully!');
@@ -108,9 +110,10 @@ export default function AdminServices() {
     mutationFn: async () => {
       if (!editingService) return;
 
-      const { error } = await supabase
-        .from('services')
-        .update({
+      await apiFetch(`/api/admin/services/${editingService.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           provider_service_id: formData.provider_service_id,
           name: formData.name,
           category: formData.category,
@@ -122,10 +125,8 @@ export default function AdminServices() {
           quality: formData.quality,
           drip_feed_enabled: formData.drip_feed_enabled,
           is_active: formData.is_active,
-        })
-        .eq('id', editingService.id);
-
-      if (error) throw error;
+        }),
+      });
     },
     onSuccess: () => {
       toast.success('Service updated successfully!');
@@ -140,39 +141,9 @@ export default function AdminServices() {
 
   const deleteServiceMutation = useMutation({
     mutationFn: async (id: string) => {
-      // Detach from any places that reference this service (FK constraints)
-      const { error: bundleError } = await supabase
-        .from('bundle_items')
-        .update({ service_id: null })
-        .eq('service_id', id);
-      if (bundleError) throw bundleError;
-
-      const { error: engagementItemsError } = await supabase
-        .from('engagement_order_items')
-        .update({ service_id: null })
-        .eq('service_id', id);
-      if (engagementItemsError) throw engagementItemsError;
-
-      const { error: ordersError } = await supabase
-        .from('orders')
-        .update({ service_id: null })
-        .eq('service_id', id);
-      if (ordersError) throw ordersError;
-
-      // Delete provider mappings for this service
-      const { error: mappingsError } = await supabase
-        .from('service_provider_mapping')
-        .delete()
-        .eq('service_id', id);
-      if (mappingsError) throw mappingsError;
-
-      // Finally delete the service
-      const { error } = await supabase
-        .from('services')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      // Server detaches FK references (bundle_items, engagement_order_items,
+      // orders, service_provider_mapping) then deletes the service.
+      await apiFetch(`/api/admin/services/${id}`, { method: 'DELETE' });
     },
     onSuccess: () => {
       toast.success('Service deleted successfully!');
@@ -187,12 +158,11 @@ export default function AdminServices() {
 
   const toggleServiceMutation = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
-      const { error } = await supabase
-        .from('services')
-        .update({ is_active: !is_active })
-        .eq('id', id);
-
-      if (error) throw error;
+      await apiFetch(`/api/admin/services/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !is_active }),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-all-services'] });
@@ -267,11 +237,11 @@ export default function AdminServices() {
               onClick={async () => {
                 setIsSyncingPrices(true);
                 try {
-                  const { data, error } = await supabase.functions.invoke('sync-service-prices', {
-                    body: {},
+                  const data = await apiFetch('/api/admin/services/sync-prices', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}),
                   });
-                  if (error) throw error;
-                  if (data?.error) throw new Error(data.error);
                   toast.success(`${data.updated} service prices synced from providers!`);
                   queryClient.invalidateQueries({ queryKey: ['admin-all-services'] });
                 } catch (err: any) {

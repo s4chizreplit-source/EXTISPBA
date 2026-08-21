@@ -1,9 +1,19 @@
-import { supabase } from "@/integrations/supabase/client";
-import type { User, Session } from "@supabase/supabase-js";
+export interface User {
+  id: string;
+  email?: string;
+  aud?: string;
+  role?: string;
+  app_metadata?: Record<string, unknown>;
+  user_metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
 
-export { supabase };
-
-export type { User, Session };
+export interface Session {
+  user?: User;
+  access_token?: string;
+  expires_at?: number;
+}
 
 export interface Profile {
   id: string;

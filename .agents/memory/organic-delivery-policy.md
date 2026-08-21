@@ -20,3 +20,9 @@ Provider accounts, API credentials, and service mappings are managed through the
 **Why:** The user maintains the complete provider setup in Admin Panel and expects orders to use those linked accounts directly.
 
 **How to apply:** Preserve Admin Panel credentials during idempotent seeds, pre-create missing account/mapping slots without overwriting keys, and dispatch through `service_provider_mapping` to the linked active account.
+
+Restored historical runs whose parent order number is below 3800 are display-only records. Never dispatch, poll, recover, reset, or requeue them.
+
+**Why:** The full Extips history includes unfinished legacy runs; processing them again would resend old orders and could create duplicate provider charges.
+
+**How to apply:** Every background cron path that mutates run state must join through the engagement item to its parent order and require order number 3800 or newer.

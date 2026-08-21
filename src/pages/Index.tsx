@@ -42,7 +42,7 @@ const Index = () => {
         <div className="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2.5">
             <img src={logo} alt="Extips Panel Pro" width={32} height={32} fetchPriority="high" decoding="async"
-              className="h-8 w-8 rounded-md object-cover ring-1" style={{ ringColor: '#93c5fd' }} />
+              className="h-8 w-8 rounded-md object-cover ring-1 ring-blue-300" />
             <span className="text-[15px] font-semibold tracking-tight text-slate-800">Extips Panel Pro</span>
             <span className="hidden sm:inline text-[10px] uppercase tracking-[0.18em] ml-2 px-1.5 py-0.5 rounded border font-semibold"
               style={{ color: '#2563eb', borderColor: '#93c5fd', background: '#eff6ff' }}>v3</span>

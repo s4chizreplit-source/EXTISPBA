@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ArrowLeft, Save, Search, RefreshCw, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: "include", ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
 
 interface ProviderAccount {
   id: string;
@@ -55,14 +61,9 @@ export default function AdminServiceProviderMapping() {
   const { data: services, isLoading: servicesLoading } = useQuery({
     queryKey: ["services-for-mapping"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("services")
-        .select("id, name, provider_id, provider_service_id, category, is_active")
-        .eq("is_active", true)
-        .order("category")
-        .order("name");
-      if (error) throw error;
-      return data as Service[];
+      const data = await apiFetch("/api/admin/bundles/services");
+      const rows = (Array.isArray(data) ? data : data?.services) || [];
+      return (rows as Service[]).filter((s) => s.is_active !== false);
     },
   });
 
@@ -70,14 +71,9 @@ export default function AdminServiceProviderMapping() {
   const { data: accounts } = useQuery({
     queryKey: ["provider-accounts-for-mapping"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("provider_accounts")
-        .select("*")
-        .eq("is_active", true)
-        .order("provider_id")
-        .order("priority");
-      if (error) throw error;
-      return data as ProviderAccount[];
+      const data = await apiFetch("/api/admin/provider-accounts");
+      const rows = (Array.isArray(data) ? data : data?.accounts) || [];
+      return (rows as ProviderAccount[]).filter((a) => a.is_active !== false);
     },
   });
 
@@ -86,12 +82,11 @@ export default function AdminServiceProviderMapping() {
     queryKey: ["service-mappings", selectedServiceId],
     queryFn: async () => {
       if (!selectedServiceId) return [];
-      const { data, error } = await supabase
-        .from("service_provider_mapping")
-        .select("*")
-        .eq("service_id", selectedServiceId);
-      if (error) throw error;
-      return data as ServiceMapping[];
+      const data = await apiFetch(
+        `/api/admin/bundles/service-provider-mappings?service_id=${selectedServiceId}`
+      );
+      const rows = (Array.isArray(data) ? data : data?.mappings) || [];
+      return rows as ServiceMapping[];
     },
     enabled: !!selectedServiceId,
   });
@@ -146,60 +141,19 @@ export default function AdminServiceProviderMapping() {
     mutationFn: async () => {
       if (!selectedServiceId) return;
 
-      // Get current mappings for this service
-      const { data: currentMappings } = await supabase
-        .from("service_provider_mapping")
-        .select("id, provider_account_id")
-        .eq("service_id", selectedServiceId);
+      // Server performs the diff (delete unchecked, upsert checked) in a tx.
+      const payload = Object.entries(mappings).map(([accountId, data]) => ({
+        provider_account_id: accountId,
+        provider_service_id: data.serviceId,
+        sort_order: data.sortOrder,
+        checked: data.checked,
+      }));
 
-      const currentAccountIds = new Set(currentMappings?.map(m => m.provider_account_id) || []);
-      const newAccountIds = new Set(
-        Object.entries(mappings)
-          .filter(([_, val]) => val.checked)
-          .map(([id]) => id)
-      );
-
-      // Batch delete removed mappings
-      const toDelete = (currentMappings || []).filter(m => !newAccountIds.has(m.provider_account_id));
-      if (toDelete.length > 0) {
-        await supabase
-          .from("service_provider_mapping")
-          .delete()
-          .in("id", toDelete.map(m => m.id));
-      }
-
-      // Batch insert new mappings
-      const toInsert = Object.entries(mappings)
-        .filter(([accountId, data]) => data.checked && !currentAccountIds.has(accountId))
-        .map(([accountId, data]) => ({
-          service_id: selectedServiceId,
-          provider_account_id: accountId,
-          provider_service_id: data.serviceId,
-          sort_order: data.sortOrder,
-          is_active: data.active,
-        }));
-
-      if (toInsert.length > 0) {
-        await supabase.from("service_provider_mapping").insert(toInsert);
-      }
-
-      // Parallel updates for existing mappings
-      const toUpdate = Object.entries(mappings)
-        .filter(([accountId, data]) => data.checked && currentAccountIds.has(accountId));
-
-      await Promise.all(
-        toUpdate.map(([accountId, data]) =>
-          supabase
-            .from("service_provider_mapping")
-            .update({
-              provider_service_id: data.serviceId,
-              sort_order: data.sortOrder,
-              is_active: data.active,
-            })
-            .eq("service_id", selectedServiceId)
-            .eq("provider_account_id", accountId)
-        )
-      );
+      await apiFetch("/api/admin/bundles/service-provider-mappings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service_id: selectedServiceId, mappings: payload }),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["service-mappings"] });
@@ -222,11 +176,11 @@ export default function AdminServiceProviderMapping() {
     }
     setVerifyingId(accountId);
     try {
-      const { data, error } = await supabase.functions.invoke("verify-provider-mapping", {
-        body: { provider_account_id: accountId, provider_service_id: providerServiceId },
-      });
-      if (error) throw error;
-      const result = data as any;
+      const result = await apiFetch("/api/admin/service-provider-mappings/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider_account_id: accountId, provider_service_id: providerServiceId }),
+      }) as any;
       if (result?.verified) {
         toast.success(`Verified on ${result.provider}: ${result.service?.name || providerServiceId}`);
       } else {

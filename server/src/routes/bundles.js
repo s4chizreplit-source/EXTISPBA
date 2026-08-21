@@ -186,23 +186,39 @@ router.post('/service-provider-mappings', ah(async (req, res) => {
   res.json({ ok: true, mappings: rows });
 }));
 
-// ─── POST /api/admin/import-services ─────────────────────────────────────
-// Body: { provider_id, action:'import', service_ids:[], markup_percent:0, category_override? }
-// Fetches service details from the SMM provider API and upserts into services table.
+// ─── POST /api/admin/bundles/import-services ─────────────────────────────
+// Body:
+//   { provider_id, action:'fetch',  search_query?, markup_percent? }
+//   { provider_id, action:'import', service_ids:[], markup_percent?, category_override? }
+// Fetches service list from the SMM provider API. 'fetch' returns the catalog
+// for the UI; 'import' upserts the selected services into the services table.
+// Never returns provider API keys.
 router.post('/import-services', ah(async (req, res) => {
-  const { provider_id, service_ids = [], markup_percent = 0, category_override } = req.body;
+  const {
+    provider_id,
+    action = 'import',
+    service_ids = [],
+    markup_percent = 0,
+    category_override,
+    search_query = '',
+  } = req.body || {};
   if (!provider_id) return res.status(400).json({ error: 'provider_id required' });
 
-  // Get an active provider account for this provider
+  // Get an active provider account for this provider (least recently used).
   const { rows: accounts } = await query(
-    `SELECT api_url, api_key FROM provider_accounts WHERE provider_id=$1 AND is_active=true LIMIT 1`,
+    `SELECT api_url, api_key FROM provider_accounts
+      WHERE provider_id = $1 AND is_active = true
+        AND NULLIF(TRIM(api_key), '') IS NOT NULL
+        AND NULLIF(TRIM(api_url), '') IS NOT NULL
+      ORDER BY last_used_at ASC NULLS FIRST
+      LIMIT 1`,
     [provider_id]
   );
   if (!accounts.length) return res.status(404).json({ error: `No active account for provider ${provider_id}` });
 
   const { api_url, api_key } = accounts[0];
 
-  // Fetch services list from provider
+  // Fetch services list from provider.
   const body = new URLSearchParams({ key: api_key, action: 'services' });
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 30000);
@@ -216,6 +232,8 @@ router.post('/import-services', ah(async (req, res) => {
     });
     const text = await r.text();
     providerServices = JSON.parse(text);
+  } catch (e) {
+    return res.status(502).json({ error: `Provider request failed: ${e.message}` });
   } finally {
     clearTimeout(t);
   }
@@ -224,33 +242,80 @@ router.post('/import-services', ah(async (req, res) => {
     return res.status(502).json({ error: 'Provider returned unexpected format' });
   }
 
-  // Filter to requested IDs
-  const ids = new Set(service_ids.map(String));
-  const toImport = ids.size > 0
-    ? providerServices.filter(s => ids.has(String(s.service || s.id)))
-    : providerServices;
-
-  let imported = 0;
-  for (const svc of toImport) {
-    const svcId    = String(svc.service || svc.id);
-    const rawPrice = parseFloat(svc.rate ?? svc.price ?? 0) / 1000; // rate is per 1000
-    const markup   = 1 + (markup_percent / 100);
-    const price    = Math.round(rawPrice * markup * 1000000) / 1000000;
-    const name     = svc.name || `Service ${svcId}`;
-    const category = category_override || svc.category || 'General';
-    const minQty   = parseInt(svc.min ?? svc.min_quantity ?? 10);
-
-    await query(
-      `INSERT INTO services (provider_id, provider_service_id, name, category, price, min_quantity, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,true)
-       ON CONFLICT (provider_id, provider_service_id)
-       DO UPDATE SET name=$3, category=$4, price=$5, min_quantity=$6, is_active=true, updated_at=now()`,
-      [provider_id, svcId, name, category, price, minQty]
-    );
-    imported++;
+  // ── action: 'fetch' — return the (optionally searched) catalog ──────────
+  if (action === 'fetch') {
+    const q = String(search_query || '').trim().toLowerCase();
+    const normalized = providerServices.map((s) => ({
+      service_id: String(s.service ?? s.id ?? ''),
+      name: s.name || `Service ${s.service ?? s.id ?? ''}`,
+      category: s.category || 'General',
+      rate: Number(parseFloat(s.rate ?? s.price ?? 0)) || 0,
+      min: parseInt(s.min ?? s.min_quantity ?? 0, 10) || 0,
+      max: parseInt(s.max ?? s.max_quantity ?? 0, 10) || 0,
+      dripfeed: s.dripfeed === true || String(s.dripfeed).toLowerCase() === 'true' || s.dripfeed === 1,
+      refill: s.refill === true || String(s.refill).toLowerCase() === 'true' || s.refill === 1,
+    }));
+    const filtered = q
+      ? normalized.filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) ||
+            s.category.toLowerCase().includes(q) ||
+            s.service_id.includes(q)
+        )
+      : normalized;
+    return res.json({ services: filtered, total: normalized.length, filtered: filtered.length });
   }
 
-  res.json({ success: true, imported, total: toImport.length });
+  // ── action: 'import' — upsert selected services ─────────────────────────
+  const ids = new Set(service_ids.map(String));
+  const toImport = ids.size > 0
+    ? providerServices.filter((s) => ids.has(String(s.service ?? s.id)))
+    : providerServices;
+
+  const markup = 1 + (Number(markup_percent) / 100);
+  let imported = 0;
+  let updated = 0;
+
+  await withTx(async (client) => {
+    for (const svc of toImport) {
+      const svcId    = String(svc.service ?? svc.id);
+      const rawPrice = parseFloat(svc.rate ?? svc.price ?? 0) / 1000; // provider rate is per 1000
+      const price    = Math.round(rawPrice * markup * 1000000) / 1000000;
+      const name     = svc.name || `Service ${svcId}`;
+      const category = category_override || svc.category || 'General';
+      const minQty   = parseInt(svc.min ?? svc.min_quantity ?? 10, 10) || 10;
+      const maxQty   = parseInt(svc.max ?? svc.max_quantity ?? 100000, 10) || 100000;
+      const dripfeed = svc.dripfeed === true || String(svc.dripfeed).toLowerCase() === 'true' || svc.dripfeed === 1;
+
+      // Manual upsert — the services table has no unique (provider_id, provider_service_id) constraint.
+      const existing = await client.query(
+        `SELECT id FROM services WHERE provider_id = $1 AND provider_service_id = $2 LIMIT 1`,
+        [provider_id, svcId]
+      );
+      if (existing.rows[0]) {
+        await client.query(
+          `UPDATE services
+              SET name = $1, category = $2, price = $3,
+                  min_quantity = $4, max_quantity = $5,
+                  drip_feed_enabled = $6, is_active = true, updated_at = now()
+            WHERE id = $7`,
+          [name, category, price, minQty, maxQty, dripfeed, existing.rows[0].id]
+        );
+        updated += 1;
+      } else {
+        await client.query(
+          `INSERT INTO services
+             (provider_id, provider_service_id, name, category, price,
+              min_quantity, max_quantity, drip_feed_enabled, is_active)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true)`,
+          [provider_id, svcId, name, category, price, minQty, maxQty, dripfeed]
+        );
+        imported += 1;
+      }
+    }
+  });
+
+  res.json({ success: true, imported, updated, total: toImport.length });
 }));
 
 export default router;

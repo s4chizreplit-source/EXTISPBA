@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,33 +16,15 @@ export function CronStatusPanel() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['cron-status-panel'],
     queryFn: async () => {
-      const nowIso = new Date().toISOString();
-
-      const [statusRes, overdueRes, lastCompletedRes] = await Promise.all([
-        supabase.functions.invoke<CronStatusData>('cron-status'),
-        supabase
-          .from('organic_run_schedule')
-          .select('id, scheduled_at', { count: 'exact' })
-          .eq('status', 'pending')
-          .not('engagement_order_item_id', 'is', null)
-          .lte('scheduled_at', nowIso)
-          .order('scheduled_at', { ascending: true })
-          .limit(5),
-        supabase
-          .from('organic_run_schedule')
-          .select('completed_at')
-          .eq('status', 'completed')
-          .not('engagement_order_item_id', 'is', null)
-          .order('completed_at', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-      ]);
+      const res = await fetch('/api/admin/cron/status', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load cron status');
+      const body = await res.json();
 
       return {
-        cron: statusRes.data,
-        overdueCount: overdueRes.count ?? 0,
-        oldestOverdue: overdueRes.data?.[0]?.scheduled_at ?? null,
-        lastCompletedAt: lastCompletedRes.data?.completed_at ?? null,
+        cron: (body.cron ?? body) as CronStatusData | null,
+        overdueCount: body.overdueCount ?? 0,
+        oldestOverdue: body.oldestOverdue ?? null,
+        lastCompletedAt: body.lastCompletedAt ?? null,
       };
     },
     refetchInterval: 30000,

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -41,18 +40,18 @@ export default function AdminOxapayLog() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['oxapay-activity-log', sourceFilter, statusFilter, search],
     queryFn: async () => {
-      let q = supabase
-        .from('oxapay_activity_log' as any)
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(300);
-      if (sourceFilter !== 'all') q = q.eq('source', sourceFilter);
-      if (statusFilter === 'ok') q = q.eq('ok', true);
-      if (statusFilter === 'error') q = q.eq('ok', false);
-      if (search.trim()) q = q.ilike('order_id', `%${search.trim()}%`);
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data || []) as unknown as LogRow[];
+      const params = new URLSearchParams({ limit: '300' });
+      if (sourceFilter !== 'all') params.set('source', sourceFilter);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (search.trim()) params.set('search', search.trim());
+
+      const res = await fetch(`/api/admin/oxapay/log?${params.toString()}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to load OxaPay activity log');
+      const body = await res.json();
+      const list = Array.isArray(body) ? body : (body.events ?? body.data ?? []);
+      return list as LogRow[];
     },
     refetchInterval: 15000,
   });

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -64,17 +63,18 @@ export default function AdminSecurityAudit() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['security-audit-log', categoryFilter, providerFilter, search],
     queryFn: async () => {
-      let q = supabase
-        .from('security_audit_log' as any)
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500);
-      if (categoryFilter !== 'all') q = q.eq('category', categoryFilter);
-      if (providerFilter !== 'all') q = q.eq('provider', providerFilter);
-      if (search.trim()) q = q.or(`order_id.ilike.%${search.trim()}%,user_id.eq.${search.trim()},ip.ilike.%${search.trim()}%`);
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data || []) as unknown as AuditRow[];
+      const params = new URLSearchParams({ limit: '500' });
+      if (categoryFilter !== 'all') params.set('category', categoryFilter);
+      if (providerFilter !== 'all') params.set('provider', providerFilter);
+      if (search.trim()) params.set('search', search.trim());
+
+      const res = await fetch(`/api/admin/security-audit?${params.toString()}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to load security audit log');
+      const body = await res.json();
+      const list = Array.isArray(body) ? body : (body.events ?? body.data ?? []);
+      return list as AuditRow[];
     },
     refetchInterval: 20000,
   });

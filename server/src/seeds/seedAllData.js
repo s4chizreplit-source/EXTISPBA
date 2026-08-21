@@ -52,8 +52,14 @@ export async function seedAllData() {
   // One-time historical reporting baseline. This changes only the admin
   // aggregate; wallet balances and transaction history remain untouched.
   try {
+    await query(`
+      ALTER TABLE public.platform_settings
+        ADD COLUMN IF NOT EXISTS funds_added_baseline_inr numeric(14, 2),
+        ADD COLUMN IF NOT EXISTS funds_added_baseline_count integer,
+        ADD COLUMN IF NOT EXISTS funds_added_baseline_at timestamptz
+    `);
     const baseline = await query(
-      `UPDATE platform_settings
+      `UPDATE public.platform_settings
           SET funds_added_baseline_inr = $1,
               funds_added_baseline_count = $2,
               funds_added_baseline_at = now(),
@@ -193,35 +199,8 @@ export async function seedAllData() {
   }
 
   // ── Engagement Orders ─────────────────────────────────────────────────────
-  // NOTE: VPS order history intentionally NOT re-seeded (user requested clean slate).
-  // Production was initially published with 2,695 legacy order headers, while
-  // development had already been cleaned. Remove only that imported range.
-  // This is idempotent and can never touch new orders, which start at 3800.
-  try {
-    await query(
-      `DELETE FROM organic_run_schedule
-        WHERE engagement_order_item_id IN (
-          SELECT eoi.id
-            FROM engagement_order_items eoi
-            JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
-           WHERE eo.order_number < 3800
-        )`
-    );
-    await query(
-      `DELETE FROM engagement_order_items
-        WHERE engagement_order_id IN (
-          SELECT id FROM engagement_orders WHERE order_number < 3800
-        )`
-    );
-    const removed = await query(
-      `DELETE FROM engagement_orders WHERE order_number < 3800`
-    );
-    if (removed.rowCount > 0) {
-      console.log(`[seed] removed ${removed.rowCount} legacy engagement orders (< 3800)`);
-    }
-  } catch (e) {
-    console.error('[seed] legacy engagement order cleanup failed:', e.message);
-  }
+  // Historical VPS orders are restored separately from the archived database
+  // and remain read-only. The dispatcher ignores order numbers below 3800.
 
   // Sequence starts at 3800 so new orders don't collide with VPS order numbers.
   try {

@@ -1,18 +1,19 @@
 ---
-name: Seed guard — engagement orders
-description: Why VPS engagement orders must NOT be re-seeded on server startup.
+name: Historical order restore guard
+description: Preserve restored VPS history without redispatching old delivery runs.
 ---
 
 ## Rule
-The `seedAllData.js` seed must NOT insert rows into `engagement_orders`. The engagement orders seed block was permanently removed.
+Keep the restored VPS engagement orders, items, delivery runs, and health history. Startup seeds must never delete or rewrite them, and cron must only mutate orders numbered 3800 or newer.
 
 ## Why
-User explicitly requested a full order history wipe (clean slate). The seed previously contained 2695 VPS historical orders and would re-insert them after any TRUNCATE because the seed's count-guard (`cnt >= seedData.length`) detected 0 rows and inserted all of them.
+The user reversed the earlier clean-slate decision and explicitly requested the complete Extips history. The archive includes unfinished historical runs; allowing cron to process them would resend old paid orders to providers.
 
-## What remains
-- Sequence is kept at >= 3800 so new production orders don't collide with old VPS order numbers.
-- profiles, wallets, engagement_bundles, bundle_items are still seeded on first startup.
+## What is preserved
+- Historical order numbers range below 3800.
+- New orders still begin at 3800.
+- Historical statuses, provider responses, health records, quantities, and timestamps remain exactly as archived.
 
 ## How to apply
-If someone asks to "restore order history" or "re-seed orders", do NOT add the engagement orders back to seedAllData.js. Instead, restore from a DB backup or manually import.
-If `engagement_orders_order_number_seq` is ever reset, re-run: `SELECT setval('engagement_orders_order_number_seq', 3800, false);`
+Restore history from the archived database rather than application seed arrays. Any cron query that dispatches, polls, recovers, resets, or requeues runs must join the parent engagement order and enforce order number 3800 or newer.
+After any restore, keep the next order sequence at 3800 without consuming it.

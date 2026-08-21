@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -70,23 +69,18 @@ export default function AdminWebhookEvents() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['webhook_events', providerFilter, outcomeFilter, search],
     queryFn: async () => {
-      let q = supabase
-        .from('webhook_events')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500);
+      const params = new URLSearchParams({ limit: '500' });
+      if (providerFilter !== 'all') params.set('provider', providerFilter);
+      if (outcomeFilter !== 'all') params.set('outcome', outcomeFilter);
+      if (search.trim()) params.set('search', search.trim());
 
-      if (providerFilter !== 'all') q = q.eq('provider', providerFilter);
-      if (outcomeFilter !== 'all') q = q.eq('outcome', outcomeFilter);
-      if (search.trim()) {
-        const s = search.trim();
-        q = q.or(
-          `order_id.ilike.%${s}%,track_id.ilike.%${s}%,payload_hash.ilike.%${s}%,message.ilike.%${s}%`,
-        );
-      }
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data ?? []) as EventRow[];
+      const res = await fetch(`/api/admin/webhook-events?${params.toString()}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to load webhook events');
+      const body = await res.json();
+      const list = Array.isArray(body) ? body : (body.events ?? body.data ?? []);
+      return list as EventRow[];
     },
     refetchInterval: 15_000,
   });

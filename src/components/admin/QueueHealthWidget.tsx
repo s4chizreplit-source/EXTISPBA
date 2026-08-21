@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -28,90 +27,21 @@ export function QueueHealthWidget() {
   const { data: stats, isLoading, refetch, isFetching } = useQuery<QueueStats>({
     queryKey: ['queue-health'],
     queryFn: async () => {
-      const now = new Date();
-      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
-      const nowIso = now.toISOString();
-
-      const [
-        { data: overdue },
-        { data: started },
-        { data: completedRecent },
-        { data: failedRecent },
-        { data: allPending },
-        { data: providerBreakdown },
-      ] = await Promise.all([
-        // Overdue pending (scheduled_at < now)
-        supabase
-          .from('organic_run_schedule')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'pending')
-          .lte('scheduled_at', nowIso),
-        // Currently started
-        supabase
-          .from('organic_run_schedule')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'started'),
-        // Completed in last 1h
-        supabase
-          .from('organic_run_schedule')
-          .select('id, started_at, completed_at', { count: 'exact' })
-          .eq('status', 'completed')
-          .gte('completed_at', oneHourAgo),
-        // Failed in last 1h
-        supabase
-          .from('organic_run_schedule')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'failed')
-          .gte('completed_at', oneHourAgo),
-        // Total pending
-        supabase
-          .from('organic_run_schedule')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'pending'),
-        // Provider rotation stats (last 24h completed/failed with account name)
-        supabase
-          .from('organic_run_schedule')
-          .select('provider_account_name, status')
-          .in('status', ['started', 'completed', 'failed'])
-          .not('provider_account_name', 'is', null)
-          .gte('started_at', new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()),
-      ]);
-
-      // Calculate avg completion time
-      let avgMin = 0;
-      if (completedRecent && completedRecent.length > 0) {
-        const durations = completedRecent
-          .filter((r: any) => r.started_at && r.completed_at)
-          .map((r: any) => (new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 60000);
-        if (durations.length > 0) {
-          avgMin = Math.round(durations.reduce((a: number, b: number) => a + b, 0) / durations.length);
-        }
-      }
-
-      // Build provider stats
-      const providerMap = new Map<string, { started: number; completed: number; failed: number }>();
-      if (providerBreakdown) {
-        for (const row of providerBreakdown) {
-          const name = (row as any).provider_account_name || 'Unknown';
-          if (!providerMap.has(name)) providerMap.set(name, { started: 0, completed: 0, failed: 0 });
-          const entry = providerMap.get(name)!;
-          const status = (row as any).status;
-          if (status === 'started') entry.started++;
-          else if (status === 'completed') entry.completed++;
-          else if (status === 'failed') entry.failed++;
-        }
-      }
+      const res = await fetch('/api/admin/queue-health', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load queue health');
+      const body = await res.json();
 
       return {
-        overduePending: (overdue as any)?.length ?? 0,
-        activeStarted: (started as any)?.length ?? 0,
-        completedLast1h: completedRecent?.length ?? 0,
-        failedLast1h: (failedRecent as any)?.length ?? 0,
-        totalPending: (allPending as any)?.length ?? 0,
-        avgCompletionMin: avgMin,
-        providerStats: Array.from(providerMap.entries())
-          .map(([name, s]) => ({ name, ...s }))
-          .sort((a, b) => (b.completed + b.started) - (a.completed + a.started)),
+        overduePending: body.overduePending ?? 0,
+        activeStarted: body.activeStarted ?? 0,
+        completedLast1h: body.completedLast1h ?? 0,
+        failedLast1h: body.failedLast1h ?? 0,
+        totalPending: body.totalPending ?? 0,
+        avgCompletionMin: body.avgCompletionMin ?? 0,
+        providerStats: (body.providerStats ?? []).sort(
+          (a: QueueStats['providerStats'][number], b: QueueStats['providerStats'][number]) =>
+            (b.completed + b.started) - (a.completed + a.started),
+        ),
       };
     },
     refetchInterval: 30000,

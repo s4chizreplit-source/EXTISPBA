@@ -359,9 +359,16 @@ router.post('/create', requireAuth, ah(async (req, res) => {
 
     // Record transaction
     await client.query(
-      `INSERT INTO transactions (user_id, type, amount, balance_after, order_id, status, description)
+      `INSERT INTO transactions
+         (user_id, type, amount, balance_after, payment_reference, status, description)
        VALUES ($1,'order_payment',$2,$3,$4,'completed',$5)`,
-      [userId, total_price, newBalance, ord.id, `Engagement Order #${ord.order_number}`]
+      [
+        userId,
+        total_price,
+        newBalance,
+        `engagement-order:${ord.id}`,
+        `Engagement Order #${ord.order_number}`,
+      ]
     );
 
     // Create items

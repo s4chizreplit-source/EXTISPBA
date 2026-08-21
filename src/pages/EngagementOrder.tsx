@@ -151,14 +151,15 @@ export default function EngagementOrder() {
   });
 
   // Get unique platforms that have active bundles with engagement items
-  const availablePlatforms = useMemo(() => {
+  const availablePlatforms = useMemo<string[]>(() => {
     console.log('[EngagementOrder] allBundles:', allBundles);
-    if (!allBundles) return [];
+    if (!Array.isArray(allBundles)) return [];
     // Show platforms that have at least one bundle with items configured
     const platforms = allBundles
-      .filter(b => b.items && b.items.length > 0)
-      .map(b => b.platform);
-    const result = [...new Set(platforms)];
+      .filter((b: { items?: unknown[] }) => Array.isArray(b.items) && b.items.length > 0)
+      .map((b: { platform?: unknown }) => b.platform)
+      .filter((value: unknown): value is string => typeof value === 'string' && value.length > 0);
+    const result = [...new Set<string>(platforms)];
     console.log('[EngagementOrder] availablePlatforms:', result);
     return result;
   }, [allBundles]);

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import {
   Dialog,
   DialogContent,
@@ -27,6 +26,13 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ScrollArea } from '@/components/ui/scroll-area';
+
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: 'include', ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
 
 interface ProviderService {
   service_id: string;
@@ -55,17 +61,13 @@ export function ImportServicesDialog({ open, onOpenChange, onImportSuccess }: Im
   const { data: providers } = useQuery({
     queryKey: ['admin-provider-accounts-unique'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('provider_accounts')
-        .select('provider_id, name, api_url')
-        .eq('is_active', true)
-        .order('provider_id');
-      
-      if (error) throw error;
-      
-      // Deduplicate by provider_id, keep first account's info
+      const data = await apiFetch('/api/admin/provider-accounts');
+      const accounts = (Array.isArray(data) ? data : data?.accounts) || [];
+
+      // Deduplicate by provider_id, keep first active account's info
       const uniqueMap = new Map<string, { id: string; name: string }>();
-      for (const acc of data || []) {
+      for (const acc of accounts as Array<{ provider_id: string; name: string; is_active?: boolean }>) {
+        if (acc.is_active === false) continue;
         if (!uniqueMap.has(acc.provider_id)) {
           uniqueMap.set(acc.provider_id, { id: acc.provider_id, name: `${acc.provider_id} (${acc.name})` });
         }
@@ -78,20 +80,17 @@ export function ImportServicesDialog({ open, onOpenChange, onImportSuccess }: Im
   const { data: providerServices, isLoading: loadingServices, refetch: fetchServices, isFetching } = useQuery({
     queryKey: ['provider-services', selectedProvider, searchQuery],
     queryFn: async () => {
-      const { data: session } = await supabase.auth.getSession();
-      if (!session.session) throw new Error('Not authenticated');
-
-      const response = await supabase.functions.invoke('import-services', {
-        body: {
+      const data = await apiFetch('/api/admin/bundles/import-services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           provider_id: selectedProvider,
           action: 'fetch',
           search_query: searchQuery,
           markup_percent: markupPercent,
-        },
+        }),
       });
-
-      if (response.error) throw response.error;
-      return response.data as { services: ProviderService[]; total: number; filtered: number };
+      return data as { services: ProviderService[]; total: number; filtered: number };
     },
     enabled: !!selectedProvider,
   });
@@ -103,23 +102,20 @@ export function ImportServicesDialog({ open, onOpenChange, onImportSuccess }: Im
         throw new Error('No services selected');
       }
 
-      const { data: session } = await supabase.auth.getSession();
-      if (!session.session) throw new Error('Not authenticated');
-
-      const response = await supabase.functions.invoke('import-services', {
-        body: {
+      const data = await apiFetch('/api/admin/bundles/import-services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           provider_id: selectedProvider,
           action: 'import',
           service_ids: Array.from(selectedServices),
           markup_percent: markupPercent,
-        },
+        }),
       });
-
-      if (response.error) throw response.error;
-      return response.data;
+      return data as { imported: number; updated?: number };
     },
     onSuccess: (data) => {
-      toast.success(`Successfully imported ${data.imported} services${data.updated > 0 ? `, updated ${data.updated}` : ''}`);
+      toast.success(`Successfully imported ${data.imported} services${(data.updated ?? 0) > 0 ? `, updated ${data.updated}` : ''}`);
       setSelectedServices(new Set());
       onImportSuccess();
       onOpenChange(false);

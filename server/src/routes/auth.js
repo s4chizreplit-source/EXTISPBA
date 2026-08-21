@@ -120,20 +120,42 @@ router.post(
         [email, hash, JSON.stringify({ full_name: fullName || '', role })]
       );
 
+      // Keep the imported auth schema as the FK identity anchor while the
+      // application authenticates against public.auth_users.
+      await client.query(
+        `INSERT INTO auth.users
+           (id, email, encrypted_password, raw_user_meta_data, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $5)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          inserted.id,
+          email,
+          hash,
+          JSON.stringify({ full_name: fullName || '', role }),
+          inserted.created_at,
+        ]
+      );
+
       // Role stored in user_roles table (same pattern as VPS users)
       await client.query(
-        `INSERT INTO user_roles (user_id, role) VALUES ($1, $2)`,
+        `INSERT INTO user_roles (user_id, role) VALUES ($1, $2)
+         ON CONFLICT (user_id, role) DO NOTHING`,
         [inserted.id, role]
       );
 
       // Create profile
       await client.query(
-        `INSERT INTO profiles (user_id, email, full_name) VALUES ($1, $2, $3)`,
+        `INSERT INTO profiles (user_id, email, full_name) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE
+           SET email = EXCLUDED.email, full_name = EXCLUDED.full_name`,
         [inserted.id, email, fullName || '']
       );
 
       // Create wallet
-      await client.query('INSERT INTO wallets (user_id) VALUES ($1)', [inserted.id]);
+      await client.query(
+        'INSERT INTO wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING',
+        [inserted.id]
+      );
 
       return { ...inserted, role };
     });

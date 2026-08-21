@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -25,6 +24,13 @@ import { Link, Navigate } from 'react-router-dom';
 import { format, formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
+async function apiFetch(path: string, opts?: RequestInit) {
+  const r = await fetch(path, { credentials: 'include', ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data as any)?.error || r.statusText);
+  return data;
+}
 
 interface ChatMessage {
   id: string;
@@ -117,84 +123,31 @@ export default function AdminChat() {
   const [message, setMessage] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Fetch all conversations
+  // Fetch all conversations (polling replaces realtime)
   const { data: conversations, isLoading: loadingConversations } = useQuery({
     queryKey: ['admin-chat-conversations'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('chat_conversations')
-        .select('*')
-        .order('last_message_at', { ascending: false });
-
-      if (error) throw error;
-      return data as ChatConversation[];
+      const data = await apiFetch('/api/admin/chat/conversations');
+      const list = Array.isArray(data) ? data : (data?.conversations ?? []);
+      return list as ChatConversation[];
     },
     refetchInterval: 5000,
   });
 
-  // Fetch messages for selected conversation
+  // Fetch messages for selected conversation (polling replaces realtime)
   const { data: messages } = useQuery({
     queryKey: ['admin-chat-messages', selectedConversation?.id],
     queryFn: async () => {
       if (!selectedConversation) return [];
-
-      const { data, error } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('conversation_id', selectedConversation.id)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-
-      // Mark messages as read
-      await supabase
-        .from('chat_messages')
-        .update({ is_read: true })
-        .eq('conversation_id', selectedConversation.id)
-        .eq('sender_role', 'user')
-        .eq('is_read', false);
-
-      return data as ChatMessage[];
+      const data = await apiFetch(
+        `/api/admin/chat/messages?conversation_id=${encodeURIComponent(selectedConversation.id)}`
+      );
+      const list = Array.isArray(data) ? data : (data?.messages ?? []);
+      return list as ChatMessage[];
     },
     enabled: !!selectedConversation,
     refetchInterval: 2000,
   });
-
-  // Subscribe to realtime for new messages
-  useEffect(() => {
-    const channel = supabase
-      .channel('admin-chat-all')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'chat_messages',
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['admin-chat-conversations'] });
-          if (selectedConversation) {
-            queryClient.invalidateQueries({ queryKey: ['admin-chat-messages', selectedConversation.id] });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'chat_conversations',
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['admin-chat-conversations'] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient, selectedConversation]);
 
   // Auto scroll to bottom
   useEffect(() => {
@@ -208,14 +161,14 @@ export default function AdminChat() {
     mutationFn: async (text: string) => {
       if (!user || !selectedConversation) throw new Error('Not ready');
 
-      const { error } = await supabase.from('chat_messages').insert({
-        conversation_id: selectedConversation.id,
-        sender_id: user.id,
-        sender_role: 'admin',
-        message: text.trim(),
+      await apiFetch('/api/admin/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: selectedConversation.id,
+          message: text.trim(),
+        }),
       });
-
-      if (error) throw error;
     },
     onSuccess: () => {
       setMessage('');
