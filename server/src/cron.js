@@ -23,6 +23,10 @@ import { query, withTx } from './db.js';
 const BATCH_SIZE        = 25;
 const TICK_MS           = 15_000;
 const STATUS_BATCH_SIZE = 50;   // how many 'processing' runs to status-check per tick
+const ENV_PROVIDER_URL  = String(process.env.PROVIDER_API_URL || '').trim();
+const ENV_PROVIDER_KEY  = String(process.env.PROVIDER_API_KEY || '').trim();
+const ENV_PROVIDER_NAME = String(process.env.PROVIDER_NAME || 'Primary Provider').trim();
+const HAS_ENV_PROVIDER  = Boolean(ENV_PROVIDER_URL && ENV_PROVIDER_KEY);
 
 /** True when the provider error means "same link is already active". */
 function isActiveLinkError(msg = '') {
@@ -97,6 +101,7 @@ async function processBatch() {
         COALESCE(spm.provider_service_id, s.provider_service_id)  AS provider_service_id,
         COALESCE(spm.sort_order, 999)                             AS sort_order,
         pa.id                                                     AS account_id,
+        pa.name                                                   AS account_name,
         pa.api_url,
         pa.api_key,
         COALESCE(pa.delivery_multiplier, 1)                       AS delivery_multiplier
@@ -126,17 +131,34 @@ async function processBatch() {
           retry_count:               row.retry_count,
           link:                      row.link,
           order_id:                  row.order_id,
+          provider_service_id:       row.provider_service_id,
           providers: [],
         });
       }
       if (row.account_id && row.api_url && row.api_key && row.provider_service_id) {
         byRun.get(row.id).providers.push({
           account_id:          row.account_id,
+          account_name:        row.account_name,
           api_url:             row.api_url,
           api_key:             row.api_key,
           provider_service_id: row.provider_service_id,
           delivery_multiplier: Number(row.delivery_multiplier ?? 1),
         });
+      }
+    }
+
+    if (HAS_ENV_PROVIDER) {
+      for (const run of byRun.values()) {
+        if (run.providers.length === 0 && run.provider_service_id) {
+          run.providers.push({
+            account_id: null,
+            account_name: ENV_PROVIDER_NAME,
+            api_url: ENV_PROVIDER_URL,
+            api_key: ENV_PROVIDER_KEY,
+            provider_service_id: run.provider_service_id,
+            delivery_multiplier: 1,
+          });
+        }
       }
     }
 
@@ -196,18 +218,27 @@ async function dispatchRun(run) {
                 provider_order_id=$1,
                 provider_response=$2,
                 provider_account_id=$3,
-                provider_account_name=(SELECT name FROM provider_accounts WHERE id=$3),
+                provider_account_name=$4,
                 last_status_check=now()
-          WHERE id=$4`,
-        [providerOrderId, JSON.stringify({ order: providerOrderId }), prov.account_id, run.id]
+          WHERE id=$5`,
+        [
+          providerOrderId,
+          JSON.stringify({ order: providerOrderId }),
+          prov.account_id,
+          prov.account_name || ENV_PROVIDER_NAME,
+          run.id,
+        ]
       );
-      query(`UPDATE provider_accounts SET last_used_at=now() WHERE id=$1`, [prov.account_id]).catch(() => {});
+      if (prov.account_id) {
+        query(`UPDATE provider_accounts SET last_used_at=now() WHERE id=$1`, [prov.account_id]).catch(() => {});
+      }
       console.log(`[cron] 📤 Run ${run.id} → provider order ${providerOrderId} (processing)`);
       return;
 
     } catch (err) {
       if (isActiveLinkError(err.message)) {
-        console.log(`[cron] ↩ Run ${run.id}: provider busy (${prov.account_id.slice(0,8)}…), trying next`);
+        const providerLabel = String(prov.account_id || prov.account_name || 'provider').slice(0, 16);
+        console.log(`[cron] ↩ Run ${run.id}: provider busy (${providerLabel}…), trying next`);
         continue;
       }
       allBusy  = false;
@@ -307,28 +338,42 @@ async function checkProcessingRuns() {
       ors.provider_order_id,
       ors.quantity_to_send,
       ors.engagement_order_item_id,
+      ors.provider_account_name AS saved_account_name,
       pa.id       AS account_id,
       pa.api_url,
       pa.api_key,
       pa.name     AS account_name,
       COALESCE(pa.delivery_multiplier, 1) AS delivery_multiplier
     FROM organic_run_schedule ors
-    JOIN provider_accounts pa ON pa.id = ors.provider_account_id
+    LEFT JOIN provider_accounts pa ON pa.id = ors.provider_account_id
     WHERE ors.status = 'processing'
       AND ors.provider_order_id IS NOT NULL
-      AND pa.is_active = true
-      AND NULLIF(TRIM(pa.api_key), '') IS NOT NULL
-      AND NULLIF(TRIM(pa.api_url), '') IS NOT NULL
+      AND (
+        (
+          pa.is_active = true
+          AND NULLIF(TRIM(pa.api_key), '') IS NOT NULL
+          AND NULLIF(TRIM(pa.api_url), '') IS NOT NULL
+        )
+        OR (ors.provider_account_id IS NULL AND $2::boolean)
+      )
       AND (ors.last_status_check IS NULL OR ors.last_status_check < now() - interval '30 seconds')
     ORDER BY ors.last_status_check ASC NULLS FIRST
     LIMIT $1
-  `, [STATUS_BATCH_SIZE]);
+  `, [STATUS_BATCH_SIZE, HAS_ENV_PROVIDER]);
 
   if (runs.length === 0) return;
 
   // Group by provider account so we can batch-check where possible
   const byAccount = new Map();
-  for (const run of runs) {
+  for (const dbRun of runs) {
+    const run = dbRun.account_id ? dbRun : {
+      ...dbRun,
+      account_id: 'env-provider',
+      account_name: dbRun.saved_account_name || ENV_PROVIDER_NAME,
+      api_url: ENV_PROVIDER_URL,
+      api_key: ENV_PROVIDER_KEY,
+      delivery_multiplier: 1,
+    };
     if (!byAccount.has(run.account_id)) {
       byAccount.set(run.account_id, { prov: run, runs: [] });
     }
