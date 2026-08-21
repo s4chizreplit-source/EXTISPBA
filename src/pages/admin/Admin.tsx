@@ -114,6 +114,12 @@ export default function Admin() {
   const totalWalletUsd = Number(dashboardStats?.total_wallet_balance || 0);
   const depositsTodayUsd = Number(dashboardStats?.deposits_today || 0);
   const depositsCount = Number(dashboardStats?.deposits_count || 0);
+  const totalDepositsInr = dashboardStats?.total_deposits_inr != null
+    ? Number(dashboardStats.total_deposits_inr)
+    : totalDepositsUsd * 83.5;
+  const depositsTodayInr = dashboardStats?.deposits_today_inr != null
+    ? Number(dashboardStats.deposits_today_inr)
+    : depositsTodayUsd * 83.5;
 
   return (
     <DashboardLayout>
@@ -158,7 +164,7 @@ export default function Admin() {
                 <div>
                    <p className="text-sm font-medium text-muted-foreground">Total Funds Added by Users (All Time)</p>
                   <p className="text-3xl sm:text-4xl font-extrabold text-success">
-                    ₹{(totalDepositsUsd * 83.5).toFixed(2)}
+                    ₹{totalDepositsInr.toFixed(2)}
                   </p>
                   <p className="text-[11px] text-muted-foreground mt-1">
                      All user wallets combined · {depositsCount} successful fund additions · auto-refresh every 15s
@@ -168,7 +174,7 @@ export default function Admin() {
               <div className="grid grid-cols-2 gap-3 min-w-[220px]">
                 <div className="p-3 rounded-xl bg-success/5 border border-success/20">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Today</p>
-                  <p className="text-lg font-bold text-success">₹{(depositsTodayUsd * 83.5).toFixed(2)}</p>
+                  <p className="text-lg font-bold text-success">₹{depositsTodayInr.toFixed(2)}</p>
                 </div>
                 <div className="p-3 rounded-xl bg-primary/5 border border-primary/20">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Live Balance</p>

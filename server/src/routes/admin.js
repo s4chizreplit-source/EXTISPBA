@@ -8,6 +8,8 @@ import { seedAllData } from '../seeds/seedAllData.js';
 const router = express.Router();
 router.use(requireAdmin);
 
+const INR_RATE = 83.5;
+
 function round4(n) {
   return Math.round(Number(n) * 10000) / 10000;
 }
@@ -16,6 +18,48 @@ router.get(
   '/stats',
   ah(async (_req, res) => {
     const { rows } = await query(`
+      WITH deposit_baseline AS (
+        SELECT
+          ps.funds_added_baseline_inr,
+          ps.funds_added_baseline_count,
+          ps.funds_added_baseline_at
+        FROM (SELECT 1) singleton
+        LEFT JOIN platform_settings ps ON ps.id = 'global'
+      ),
+      deposit_rollup AS (
+        SELECT
+          b.funds_added_baseline_inr,
+          b.funds_added_baseline_count,
+          b.funds_added_baseline_at,
+          COALESCE(
+            SUM(t.amount) FILTER (
+              WHERE b.funds_added_baseline_at IS NULL
+                 OR t.created_at > b.funds_added_baseline_at
+            ),
+            0
+          ) AS deposits_after_baseline,
+          COUNT(t.id) FILTER (
+            WHERE b.funds_added_baseline_at IS NULL
+               OR t.created_at > b.funds_added_baseline_at
+          )::int AS deposit_count_after_baseline,
+          COALESCE(
+            SUM(t.amount) FILTER (
+              WHERE t.created_at >= GREATEST(
+                CURRENT_DATE::timestamptz,
+                COALESCE(b.funds_added_baseline_at, CURRENT_DATE::timestamptz)
+              )
+            ),
+            0
+          ) AS deposits_today
+        FROM deposit_baseline b
+        LEFT JOIN transactions t
+          ON t.type = 'deposit'
+         AND t.status = 'completed'
+        GROUP BY
+          b.funds_added_baseline_inr,
+          b.funds_added_baseline_count,
+          b.funds_added_baseline_at
+      )
       SELECT
         (SELECT count(*)::int FROM auth.users)                                                      AS user_count,
         (SELECT count(*)::int FROM orders)                                                          AS total_orders,
@@ -23,12 +67,27 @@ router.get(
         (SELECT count(*)::int FROM services WHERE is_active)                                        AS service_count,
         (SELECT COALESCE(sum(balance),0)            FROM wallets)                                   AS total_wallet_balance,
         (SELECT COALESCE(sum(price),0)              FROM orders WHERE status <> 'failed')           AS total_revenue,
-        (SELECT COALESCE(sum(amount),0)             FROM transactions WHERE type='deposit' AND status='completed') AS total_deposits,
-        (SELECT count(*)::int                       FROM transactions WHERE type='deposit' AND status='completed') AS deposits_count,
-        (SELECT COALESCE(sum(amount),0)             FROM transactions WHERE type='deposit' AND status='completed' AND created_at >= CURRENT_DATE) AS deposits_today,
+        (
+          CASE
+            WHEN dr.funds_added_baseline_at IS NULL
+              THEN dr.deposits_after_baseline * $1
+            ELSE dr.funds_added_baseline_inr + (dr.deposits_after_baseline * $1)
+          END
+        )                                                                                           AS total_deposits_inr,
+        (
+          CASE
+            WHEN dr.funds_added_baseline_at IS NULL
+              THEN dr.deposits_after_baseline
+            ELSE (dr.funds_added_baseline_inr / $1) + dr.deposits_after_baseline
+          END
+        )                                                                                           AS total_deposits,
+        (COALESCE(dr.funds_added_baseline_count, 0) + dr.deposit_count_after_baseline)::int          AS deposits_count,
+        dr.deposits_today                                                                           AS deposits_today,
+        (dr.deposits_today * $1)                                                                    AS deposits_today_inr,
         (SELECT global_markup_percent               FROM platform_settings WHERE id='global')       AS markup,
         (SELECT maintenance_mode                    FROM platform_settings WHERE id='global')       AS maintenance_mode
-    `);
+      FROM deposit_rollup dr
+    `, [INR_RATE]);
     let provider = null;
     try { provider = await fetchProviderBalance(); } catch { provider = null; }
     res.json({ ...rows[0], providerConfigured, providerBalance: provider });

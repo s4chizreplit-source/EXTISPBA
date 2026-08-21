@@ -8,8 +8,11 @@ import { WALLETS_SEED } from './walletsSeed.js';
 import { BUNDLES_SEED } from './bundlesSeed.js';
 import { BUNDLE_ITEMS_SEED, BUNDLE_ITEM_CONFIG_SEED } from './bundleItemsSeed.js';
 import { BUNDLE_SERVICES_SEED } from './bundleServicesSeed.js';
+import { seedProviderConfiguration } from './providerSetupSeed.js';
 
 const CHUNK = 50; // smaller batches = safer on prod
+const FUNDS_ADDED_BASELINE_INR = 95234;
+const FUNDS_ADDED_BASELINE_COUNT = 800;
 
 async function seedTable(name, seedData, countQuery, insertFn, countParams = []) {
   try {
@@ -45,6 +48,29 @@ function buildValues(batch, colCount) {
 
 export async function seedAllData() {
   console.log('[seed] Starting VPS data seed…');
+
+  // One-time historical reporting baseline. This changes only the admin
+  // aggregate; wallet balances and transaction history remain untouched.
+  try {
+    const baseline = await query(
+      `UPDATE platform_settings
+          SET funds_added_baseline_inr = $1,
+              funds_added_baseline_count = $2,
+              funds_added_baseline_at = now(),
+              updated_at = now()
+        WHERE id = 'global'
+          AND funds_added_baseline_at IS NULL`,
+      [FUNDS_ADDED_BASELINE_INR, FUNDS_ADDED_BASELINE_COUNT]
+    );
+    if (baseline.rowCount > 0) {
+      console.log(
+        `[seed] funds-added reporting baseline set to ₹${FUNDS_ADDED_BASELINE_INR} ` +
+        `(${FUNDS_ADDED_BASELINE_COUNT} historical deposits)`
+      );
+    }
+  } catch (e) {
+    console.error('[seed] funds-added reporting baseline failed:', e.message);
+  }
 
   // ── Profiles ──────────────────────────────────────────────────────────────
   await seedTable(
@@ -102,6 +128,12 @@ export async function seedAllData() {
     },
     [BUNDLE_SERVICES_SEED.map(service => service.id)]
   );
+
+  try {
+    await seedProviderConfiguration();
+  } catch (e) {
+    console.error('[seed] provider setup failed:', e.message);
+  }
 
   // ── Engagement Bundles ────────────────────────────────────────────────────
   await seedTable(

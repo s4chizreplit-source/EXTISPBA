@@ -148,17 +148,18 @@ async function processBatch() {
 async function dispatchRun(run) {
   const { providers } = run;
 
-  // ── No providers configured → simulate (service not wired yet) ──────────
+  // ── No providers configured → wait; never fake a completed delivery ─────
   if (providers.length === 0) {
-    const simId = `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     await query(
       `UPDATE organic_run_schedule
-          SET status='completed', completed_at=now(),
-              provider_order_id=$1, provider_response=$2
-        WHERE id=$3`,
-      [simId, JSON.stringify({ simulated: true, reason: 'no_providers' }), run.id]
+          SET status='pending',
+              started_at=NULL,
+              scheduled_at=now() + interval '5 minutes',
+              error_message='Waiting for an active provider account and service mapping'
+        WHERE id=$1`,
+      [run.id]
     );
-    console.log(`[cron] 🔵 Run ${run.id} simulated (no providers configured)`);
+    console.warn(`[cron] ⚠ Run ${run.id} waiting: no active provider mapping/account`);
     return;
   }
 
@@ -240,6 +241,57 @@ async function dispatchRun(run) {
     [newStatus, lastErr?.message?.slice(0, 500), retryCount, run.id]
   );
   console.warn(`[cron] ❌ Run ${run.id} failed (attempt ${retryCount}): ${lastErr?.message}`);
+}
+
+async function recoverSimulatedRuns() {
+  return withTx(async (client) => {
+    const { rows } = await client.query(`
+      SELECT ors.id, eoi.id AS item_id, eo.id AS order_id
+        FROM organic_run_schedule ors
+        JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
+        JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+       WHERE ors.status = 'completed'
+         AND ors.provider_order_id LIKE 'sim_%'
+       FOR UPDATE OF ors
+    `);
+    if (rows.length === 0) return 0;
+
+    const runIds = rows.map(row => row.id);
+    const itemIds = [...new Set(rows.map(row => row.item_id))];
+    const orderIds = [...new Set(rows.map(row => row.order_id))];
+
+    await client.query(
+      `UPDATE organic_run_schedule
+          SET status='pending',
+              started_at=NULL,
+              completed_at=NULL,
+              provider_order_id=NULL,
+              provider_response=NULL,
+              provider_account_id=NULL,
+              provider_account_name=NULL,
+              provider_status=NULL,
+              last_status_check=NULL,
+              error_message='Recovered simulated run — waiting for real provider dispatch',
+              scheduled_at=LEAST(scheduled_at, now())
+        WHERE id = ANY($1::uuid[])`,
+      [runIds]
+    );
+    await client.query(
+      `UPDATE engagement_order_items
+          SET status='pending'
+        WHERE id = ANY($1::uuid[])
+          AND status='completed'`,
+      [itemIds]
+    );
+    await client.query(
+      `UPDATE engagement_orders
+          SET status='processing', updated_at=now()
+        WHERE id = ANY($1::uuid[])
+          AND status='completed'`,
+      [orderIds]
+    );
+    return rows.length;
+  });
 }
 
 // ── Status-check loop: poll provider for 'processing' runs ───────────────────
@@ -403,6 +455,12 @@ async function applyStatus(run, data) {
 
 export function startCron() {
   console.log(`[cron] Organic run dispatcher started (batch=${BATCH_SIZE}, tick=${TICK_MS / 1000}s)`);
+
+  recoverSimulatedRuns()
+    .then(count => {
+      if (count > 0) console.log(`[cron] ♻ Recovered ${count} simulated run(s) for real provider dispatch`);
+    })
+    .catch(e => console.error('[cron] Simulated-run recovery error:', e));
 
   // Reset runs that were mid-dispatch when the server last restarted.
   query(`

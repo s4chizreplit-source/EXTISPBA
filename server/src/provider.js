@@ -1,7 +1,7 @@
 /**
  * Reseller/provider API client — reads credentials from provider_accounts table.
  * Falls back to PROVIDER_API_URL + PROVIDER_API_KEY env vars if set.
- * When neither is available, runs in "simulate" mode.
+ * Missing configuration is an explicit failure; fake provider orders are never created.
  */
 
 import { query } from './db.js';
@@ -68,20 +68,12 @@ async function callProvider({ api_url, api_key }, params, timeoutMs = 20000) {
 /** Place an order with the provider. Returns { providerOrderId, raw, accountId }. */
 export async function placeProviderOrder({ providerServiceId, link, quantity }) {
   if (!providerServiceId) {
-    return {
-      providerOrderId: `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      raw: { simulated: true, reason: 'no_provider_service_id' },
-      accountId: null,
-    };
+    throw new Error('Provider service ID is not configured');
   }
 
   const acct = await pickAccount();
   if (!acct) {
-    return {
-      providerOrderId: `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      raw: { simulated: true, reason: 'no_active_provider_accounts' },
-      accountId: null,
-    };
+    throw new Error('No active provider account is configured');
   }
 
   const raw = await callProvider(acct, {

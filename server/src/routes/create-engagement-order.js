@@ -47,9 +47,19 @@ function getServiceConfig(engType) {
   return SERVICE_CONFIGS[engType] || SERVICE_CONFIGS.generic;
 }
 
-/** Make run quantities and gaps organic/unique (ported from edge function) */
-function uniquifyScheduledRuns(runs, totalTargetQty, providerMin, maxBatchCap) {
-  const base = runs
+function clampVariance(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(5, Math.min(60, numeric)) : 25;
+}
+
+function randomInt(min, max) {
+  if (max <= min) return min;
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+/** Make run quantities and gaps organic/unique while preserving the exact total. */
+export function uniquifyScheduledRuns(runs, totalTargetQty, providerMin, maxBatchCap, variancePercent = 25) {
+  let base = runs
     .map((run, index) => ({
       run_number: index + 1,
       at: new Date(run.scheduled_at).getTime(),
@@ -64,73 +74,71 @@ function uniquifyScheduledRuns(runs, totalTargetQty, providerMin, maxBatchCap) {
 
   if (base.length === 0) return [];
 
+  const total = Math.max(1, Math.round(Number(totalTargetQty) || 0));
   const previewMax = base.reduce((m, r) => Math.max(m, r.quantity_to_send), 0);
-  const cap = Math.max(maxBatchCap, Math.ceil(previewMax * 1.35));
-  const floor = Math.max(1, Math.min(providerMin, previewMax));
+  const cap = Math.max(
+    maxBatchCap,
+    Math.ceil(previewMax * 1.35),
+    Math.ceil((total / base.length) * 1.25)
+  );
+  const floor = Math.max(1, providerMin);
 
+  // A provider floor can make the preview's run count impossible. Trim only
+  // as many tail runs as needed; this applies to newly-created orders only.
+  while (base.length > 1 && floor * base.length > total) {
+    base = base.slice(0, -1);
+  }
+
+  const variance = clampVariance(variancePercent) / 100;
+  const average = total / base.length;
+  const preferredLow = Math.max(floor, Math.floor(average * (1 - variance)));
+  const preferredHigh = Math.min(cap, Math.ceil(average * (1 + variance)));
   const usedQty = new Set();
-  const isTooRound = n => n % 50 === 0 || n % 25 === 0 || n % 10 === 0;
+  const quantities = [];
+  let remaining = total;
 
-  const pickQty = (want, prev) => {
-    const target = Math.max(floor, Math.min(cap, want));
-    for (let step = 0; step <= cap; step++) {
-      const options = step === 0 ? [target]
-        : (Math.random() < 0.5 ? [target + step, target - step] : [target - step, target + step]);
-      for (const opt of options) {
-        if (opt < floor || opt > cap) continue;
-        if (usedQty.has(opt)) continue;
-        if (prev !== null && Math.abs(opt - prev) < 3) continue;
-        if (isTooRound(opt) && base.length > 1) continue;
-        return opt;
+  for (let i = 0; i < base.length; i++) {
+    const runsAfter = base.length - i - 1;
+    if (runsAfter === 0) {
+      quantities.push(remaining);
+      break;
+    }
+
+    const feasibleLow = Math.max(floor, remaining - cap * runsAfter);
+    const feasibleHigh = Math.min(cap, remaining - floor * runsAfter);
+    let low = Math.max(feasibleLow, preferredLow);
+    let high = Math.min(feasibleHigh, preferredHigh);
+    if (low > high) {
+      low = feasibleLow;
+      high = feasibleHigh;
+    }
+
+    let quantity = randomInt(low, high);
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const candidate = randomInt(low, high);
+      const tooRound = candidate % 10 === 0 || candidate % 25 === 0 || candidate % 50 === 0;
+      const tooClose = quantities.some(previous => Math.abs(previous - candidate) < 3);
+      if (!usedQty.has(candidate) && !tooRound && !tooClose) {
+        quantity = candidate;
+        break;
       }
     }
-    for (let opt = floor; opt <= cap; opt++) if (!usedQty.has(opt)) return opt;
-    return target;
-  };
+    quantities.push(quantity);
+    usedQty.add(quantity);
+    remaining -= quantity;
+  }
+
+  // Shuffle the generated quantities so growth does not form a visible ramp.
+  for (let i = quantities.length - 1; i > 0; i--) {
+    const j = randomInt(0, i);
+    [quantities[i], quantities[j]] = [quantities[j], quantities[i]];
+  }
 
   base.forEach((run, i) => {
-    const wobble = 0.75 + Math.random() * 0.5;
-    const want = Math.round(run.quantity_to_send * wobble);
-    const prev = i > 0 ? base[i - 1].quantity_to_send : null;
-    const qty = pickQty(want, prev);
-    run.quantity_to_send = qty;
-    run.base_quantity = qty;
-    usedQty.add(qty);
+    run.quantity_to_send = quantities[i];
+    run.base_quantity = quantities[i];
+    run.variance_applied = Math.round((quantities[i] / average - 1) * 100);
   });
-
-  let drift = totalTargetQty - base.reduce((s, r) => s + r.quantity_to_send, 0);
-  let guard = 0;
-  while (drift !== 0 && guard < 20000) {
-    guard++;
-    let changed = false;
-    const order = base
-      .map((r, index) => ({ index, q: r.quantity_to_send, rand: Math.random() }))
-      .sort((a, b) => drift > 0 ? a.q - b.q || a.rand - b.rand : b.q - a.q || a.rand - b.rand)
-      .map(x => x.index);
-    for (const index of order) {
-      const step = drift > 0 ? 1 : -1;
-      const next = base[index].quantity_to_send + step;
-      const prev = index > 0 ? base[index - 1].quantity_to_send : null;
-      const after = index < base.length - 1 ? base[index + 1].quantity_to_send : null;
-      if (next < floor || next > cap) continue;
-      if (usedQty.has(next)) continue;
-      if (prev !== null && Math.abs(next - prev) < 3) continue;
-      if (after !== null && Math.abs(next - after) < 3) continue;
-      usedQty.delete(base[index].quantity_to_send);
-      base[index].quantity_to_send = next;
-      base[index].base_quantity = next;
-      usedQty.add(next);
-      drift += drift > 0 ? -1 : 1;
-      changed = true;
-      if (drift === 0) break;
-    }
-    if (!changed) break;
-  }
-  if (drift !== 0) {
-    const last = base[base.length - 1];
-    last.quantity_to_send = Math.max(1, last.quantity_to_send + drift);
-    last.base_quantity = last.quantity_to_send;
-  }
 
   // Randomize gaps between runs
   const firstAt = base[0].at;
@@ -138,12 +146,13 @@ function uniquifyScheduledRuns(runs, totalTargetQty, providerMin, maxBatchCap) {
   const avgGap = spanMs / Math.max(1, base.length - 1);
   const usedGaps = new Set();
   let cursor = firstAt;
+  const gapSpread = Math.max(0.2, Math.min(0.75, variance * 1.8));
 
   base.forEach((run, i) => {
     if (i === 0) { run.at = firstAt; return; }
     let gap = 0;
     for (let attempt = 0; attempt < 60; attempt++) {
-      const wobble = 0.45 + Math.random() * 1.25;
+      const wobble = (1 - gapSpread) + Math.random() * gapSpread * 2;
       const burst = Math.random() < 0.18 ? 0.35 : 1;
       const candidate = Math.round(avgGap * wobble * burst / 60000);
       const minutes = Math.max(4, candidate) + (Math.random() < 0.5 ? 0 : 1);
@@ -171,7 +180,14 @@ function uniquifyScheduledRuns(runs, totalTargetQty, providerMin, maxBatchCap) {
 }
 
 /** Generate a fully organic run schedule with randomised quantities and gaps */
-function generateRunSchedule(engagement, providerMin, maxBatchCap, initialDelayMs, timeLimitHours) {
+export function generateRunSchedule(
+  engagement,
+  providerMin,
+  maxBatchCap,
+  initialDelayMs,
+  timeLimitHours,
+  variancePercent = 25
+) {
   const config = getServiceConfig(engagement.type);
   const startTime = Date.now() + initialDelayMs;
 
@@ -205,8 +221,12 @@ function generateRunSchedule(engagement, providerMin, maxBatchCap, initialDelayM
   const floor = providerMin;
   const total = engagement.quantity;
 
-  // Generate random weights (0.5 – 1.5 range for each run)
-  const weights = Array.from({ length: targetRuns }, () => 0.5 + Math.random());
+  // Generate random weights using the user's selected organic variance.
+  const quantityVariance = clampVariance(variancePercent) / 100;
+  const weights = Array.from(
+    { length: targetRuns },
+    () => (1 - quantityVariance) + Math.random() * quantityVariance * 2
+  );
   const weightSum = weights.reduce((s, w) => s + w, 0);
 
   // Scale to total, clamp to [floor, cap]
@@ -303,6 +323,7 @@ router.post('/create', requireAuth, ah(async (req, res) => {
   }
 
   const sanitizedCampaignName = typeof campaign_name === 'string' ? campaign_name.trim().slice(0, 120) || null : null;
+  const orderVariance = clampVariance(engagements[0]?.variance_percent);
 
   // ── Atomic: debit wallet + create order + create items ───────────────────
   const { order, itemRows } = await withTx(async (client) => {
@@ -333,7 +354,7 @@ router.post('/create', requireAuth, ah(async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'processing',$9)
        RETURNING *`,
       [userId, bundle_id, link.trim(), base_quantity, total_price, is_organic_mode ?? true,
-       25, true, sanitizedCampaignName]
+       orderVariance, true, sanitizedCampaignName]
     );
 
     // Record transaction
@@ -397,13 +418,25 @@ router.post('/create', requireAuth, ah(async (req, res) => {
 
     const maxBatchCap = Math.max(baseMaxBatchCap, Math.round(providerMin * 2.5));
     const previewRuns = Array.isArray(engagement.scheduled_runs) ? engagement.scheduled_runs : [];
+    const variancePercent = clampVariance(engagement.variance_percent);
 
-    let finalRuns;
-    if (previewRuns.length > 0) {
-      finalRuns = uniquifyScheduledRuns(previewRuns, engagement.quantity, providerMin, maxBatchCap);
-    } else {
-      finalRuns = generateRunSchedule(engagement, providerMin, maxBatchCap, initialDelayMs, timeLimitHours);
-    }
+    const candidateRuns = previewRuns.length > 0
+      ? previewRuns
+      : generateRunSchedule(
+          engagement,
+          providerMin,
+          maxBatchCap,
+          initialDelayMs,
+          timeLimitHours,
+          variancePercent
+        );
+    let finalRuns = uniquifyScheduledRuns(
+      candidateRuns,
+      engagement.quantity,
+      providerMin,
+      maxBatchCap,
+      variancePercent
+    );
 
     if (finalRuns.length === 0) {
       // Fallback: one immediate run
