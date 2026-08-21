@@ -714,7 +714,7 @@ export default function EngagementOrder() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-5xl mx-auto px-2 sm:px-6 lg:px-8 space-y-3 sm:space-y-6 pb-8">
+      <div className="max-w-5xl mx-auto min-w-0 px-0 sm:px-6 lg:px-8 space-y-3 sm:space-y-6 pb-8">
         {/* Mission Console — unique compact hero with inline AI controls */}
         <div className="relative overflow-hidden rounded-2xl border border-border bg-[#ffffff]/80 backdrop-blur-xl">
           {/* Aurora wash */}
@@ -733,7 +733,7 @@ export default function EngagementOrder() {
 
           <div className="relative z-10 p-4 sm:p-6">
             {/* Top row: status + title + live dot */}
-            <div className="flex items-start justify-between gap-3 mb-4 sm:mb-5">
+            <div className="flex items-start justify-between gap-3 mb-4 sm:mb-5 min-w-0">
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-card border border-border mb-2.5">
                   <span className="relative flex w-1.5 h-1.5">
@@ -761,7 +761,7 @@ export default function EngagementOrder() {
                 type="button"
                 onClick={() => { setIsOrganicMode(!isOrganicMode); if (!isOrganicMode) setIsAutoRatios(false); }}
                 className={cn(
-                  "group relative text-left rounded-xl border p-3 sm:p-3.5 transition-all overflow-hidden",
+                  "group relative text-left rounded-xl border p-3 sm:p-3.5 transition-all overflow-hidden min-w-0",
                   isOrganicMode
                     ? "border-emerald-400/40 bg-emerald-500/[0.08] shadow-[0_0_25px_rgba(16,185,129,0.18)]"
                     : "border-border bg-card hover:border-border hover:bg-card"
@@ -808,7 +808,7 @@ export default function EngagementOrder() {
                 type="button"
                 onClick={() => { setIsAutoRatios(!isAutoRatios); if (!isAutoRatios) setIsOrganicMode(false); }}
                 className={cn(
-                  "group relative text-left rounded-xl border p-3 sm:p-3.5 transition-all overflow-hidden",
+                  "group relative text-left rounded-xl border p-3 sm:p-3.5 transition-all overflow-hidden min-w-0",
                   isAutoRatios
                     ? "border-primary/40 bg-primary/[0.08] shadow-[0_0_25px_rgba(168,85,247,0.18)]"
                     : "border-border bg-card hover:border-border hover:bg-card"
@@ -874,12 +874,12 @@ export default function EngagementOrder() {
         {/* Link Input */}
         <Card className="glass-card border-2 border-border">
           <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5">
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5 min-w-0">
+              <div className="flex flex-1 items-center gap-2 sm:gap-3 min-w-0">
                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-foreground/10 flex items-center justify-center shrink-0">
                   <LinkIcon className="h-4 w-4 sm:h-5 sm:w-5 text-foreground" />
                 </div>
-                <Label className="text-base sm:text-lg font-bold tracking-tight text-foreground truncate">Video/Post Link</Label>
+                <Label className="text-base sm:text-lg font-bold tracking-tight text-foreground break-words">Video/Post Link</Label>
               </div>
               <AIEngagementChat
                 link={link}

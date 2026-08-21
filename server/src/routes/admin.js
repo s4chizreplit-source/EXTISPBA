@@ -930,14 +930,31 @@ router.get(
                    AND started_at IS NOT NULL), 0)                                AS avg_completion_min
       FROM organic_run_schedule
     `);
+    // The health widget is an operational view, not a historical provider
+    // catalog. Start from active, configured accounts so retired/imported
+    // provider names are not rendered as zero-value cards.
     const prov = await query(`
-      SELECT COALESCE(provider_account_name, 'Unknown') AS name,
-             COUNT(*) FILTER (WHERE status IN ('started','processing'))::int AS started,
-             COUNT(*) FILTER (WHERE status = 'completed' AND completed_at > now() - interval '1 hour')::int AS completed,
-             COUNT(*) FILTER (WHERE status = 'failed'    AND completed_at > now() - interval '1 hour')::int AS failed
-        FROM organic_run_schedule
-       WHERE provider_account_name IS NOT NULL
-       GROUP BY provider_account_name
+      SELECT pa.name,
+             COUNT(ors.id) FILTER (WHERE ors.status IN ('started','processing'))::int AS started,
+             COUNT(ors.id) FILTER (WHERE ors.status = 'completed' AND ors.completed_at > now() - interval '1 hour')::int AS completed,
+             COUNT(ors.id) FILTER (WHERE ors.status = 'failed'    AND ors.completed_at > now() - interval '1 hour')::int AS failed
+        FROM provider_accounts pa
+        JOIN providers p
+          ON p.id = pa.provider_id
+         AND p.is_active = true
+        LEFT JOIN organic_run_schedule ors
+          ON ors.provider_account_id = pa.id
+       WHERE pa.is_active = true
+         AND NULLIF(TRIM(pa.api_key), '') IS NOT NULL
+         AND NULLIF(TRIM(pa.api_url), '') IS NOT NULL
+         AND EXISTS (
+           SELECT 1
+             FROM service_provider_mapping active_mapping
+            WHERE active_mapping.provider_account_id = pa.id
+              AND active_mapping.is_active = true
+         )
+       GROUP BY pa.name
+       ORDER BY MIN(pa.priority) ASC, pa.name ASC
     `);
     const r = rows[0] || {};
     res.json({

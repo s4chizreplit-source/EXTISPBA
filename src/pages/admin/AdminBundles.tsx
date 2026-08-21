@@ -369,7 +369,7 @@ export default function AdminBundles() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 px-2 sm:px-4 lg:px-6 pb-8">
+      <div className="space-y-6 min-w-0 px-0 sm:px-4 lg:px-6 pb-8">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
           <Link
@@ -387,10 +387,10 @@ export default function AdminBundles() {
               Create platform bundles with engagement types
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-1 sm:flex gap-2 w-full sm:w-auto">
             <Button
               variant="outline"
-              className="rounded-xl gap-2"
+              className="rounded-xl gap-2 w-full sm:w-auto"
               onClick={syncAllPrices}
               disabled={isSyncing}
             >
@@ -399,7 +399,7 @@ export default function AdminBundles() {
             </Button>
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
               <DialogTrigger asChild>
-                <Button className="rounded-xl gap-2">
+                <Button className="rounded-xl gap-2 w-full sm:w-auto">
                   <Plus className="h-4 w-4" />
                   Create Bundle
                 </Button>
@@ -422,12 +422,12 @@ export default function AdminBundles() {
 
         {/* Platform Tabs */}
         <Tabs value={selectedPlatform} onValueChange={setSelectedPlatform}>
-          <TabsList className="h-11 p-1 rounded-xl bg-muted/50">
+          <TabsList className="h-auto min-h-11 w-full sm:w-fit justify-start p-1 rounded-xl bg-muted/50 mobile-scroll-x">
             {Object.entries(PLATFORM_CONFIG).map(([key, config]) => (
               <TabsTrigger
                 key={key}
                 value={key}
-                className="rounded-lg capitalize data-[state=active]:bg-background"
+                className="rounded-lg capitalize shrink-0 data-[state=active]:bg-background"
               >
                 {config.label}
               </TabsTrigger>
@@ -636,18 +636,18 @@ function BundleCard({
     <Card className="glass-card overflow-hidden">
       <CardHeader className="border-b border-border pb-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shrink-0">
               <Package className="h-5 w-5 text-primary" />
             </div>
-            <div>
-              <CardTitle className="text-lg">{bundle.name}</CardTitle>
-              <p className="text-xs text-muted-foreground">
+            <div className="min-w-0">
+              <CardTitle className="text-lg break-words">{bundle.name}</CardTitle>
+              <p className="text-xs leading-snug text-muted-foreground break-words">
                 {bundle.description || 'No description'}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Active</span>
               <Switch
@@ -668,22 +668,22 @@ function BundleCard({
       </CardHeader>
       <CardContent className="p-4 space-y-4">
         {/* AI Organic Mode Toggle - MAIN FEATURE */}
-        <div className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all ${aiOrganicEnabled
+        <div className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl border-2 transition-all ${aiOrganicEnabled
           ? 'bg-gradient-to-r from-green-500/10 via-emerald-500/5 to-teal-500/10 border-green-500/40'
           : 'bg-gradient-to-r from-orange-500/10 via-amber-500/5 to-yellow-500/10 border-orange-500/40'
           }`}>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {aiOrganicEnabled ? (
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-green-500/25">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-green-500/25 shrink-0">
                 <Brain className="h-6 w-6 text-white" />
               </div>
             ) : (
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/25">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/25 shrink-0">
                 <Sparkle className="h-6 w-6 text-white" />
               </div>
             )}
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <p className="font-bold text-base">
                   {aiOrganicEnabled ? '🤖 AI Organic Mode' : '⚡ Manual Mode'}
                 </p>
@@ -694,7 +694,7 @@ function BundleCard({
                   {aiOrganicEnabled ? 'ON' : 'OFF'}
                 </Badge>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs leading-snug text-muted-foreground mt-0.5 break-words">
                 {aiOrganicEnabled
                   ? 'AI generates UNIQUE organic patterns for each order automatically'
                   : 'Users configure their own organic settings per order'
@@ -718,27 +718,27 @@ function BundleCard({
           <Switch
             checked={aiOrganicEnabled}
             onCheckedChange={onToggleAiOrganic}
-            className="data-[state=checked]:bg-green-500"
+            className="data-[state=checked]:bg-green-500 self-end sm:self-auto"
           />
         </div>
 
         {/* Custom Ratios Toggle */}
-        <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-primary/5 to-accent/5 border border-primary/20">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl bg-gradient-to-r from-primary/5 to-accent/5 border border-primary/20">
+          <div className="flex items-center gap-3 min-w-0">
             {useCustomRatios ? (
-              <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center shrink-0">
                 <Percent className="h-5 w-5 text-primary" />
               </div>
             ) : (
-              <div className="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center shrink-0">
                 <Wand2 className="h-5 w-5 text-accent" />
               </div>
             )}
-            <div>
+            <div className="min-w-0">
               <p className="font-medium text-sm">
                 {useCustomRatios ? 'Custom Ratios' : 'AI Organic Ratios'}
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs leading-snug text-muted-foreground break-words">
                 {useCustomRatios
                   ? 'Using your custom % for each type'
                   : 'AI automatically calculates organic engagement ratios'
@@ -749,6 +749,7 @@ function BundleCard({
           <Switch
             checked={useCustomRatios}
             onCheckedChange={onToggleCustomRatios}
+            className="self-end sm:self-auto"
           />
         </div>
 
@@ -765,7 +766,7 @@ function BundleCard({
                 size="sm"
                 disabled={exists}
                 onClick={() => handleQuickAdd(type)}
-                className="capitalize rounded-lg gap-1"
+                className="capitalize rounded-lg gap-1 min-h-10 flex-1 sm:flex-none whitespace-normal"
               >
                 {Icon && <Icon className="h-3 w-3" />}
                 {label}
@@ -792,8 +793,8 @@ function BundleCard({
                 className="p-4 rounded-xl bg-muted/50 space-y-3"
               >
                 {/* Top row - Type info */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-wrap">
                     <div className="w-9 h-9 rounded-lg bg-background flex items-center justify-center">
                       <Icon className="h-4 w-4 text-muted-foreground" />
                     </div>
@@ -827,7 +828,7 @@ function BundleCard({
 
                 {/* Ratio Input - Only show when custom ratios enabled and not base */}
                 {useCustomRatios && !isBase && (
-                  <div className="flex items-center gap-2 pl-12">
+                  <div className="flex flex-wrap items-center gap-2 sm:pl-12">
                     <span className="text-xs text-muted-foreground">Custom Ratio:</span>
                     <div className="flex items-center gap-1">
                       <Input
@@ -861,7 +862,7 @@ function BundleCard({
                 )}
 
                 {/* Service Info + Provider Config */}
-                <div className="flex items-center gap-2 pl-12">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:pl-12 min-w-0">
                   {(() => {
                     // Use the JOIN data (item.service) as primary source
                     const joinedService = item.service as any;
@@ -871,11 +872,11 @@ function BundleCard({
                     const displayPrice = linkedService?.price ?? null;
 
                     return (
-                      <div className="flex-1 h-9 px-3 rounded-lg border border-border bg-background flex items-center text-xs gap-2">
+                      <div className="flex-1 min-w-0 h-auto min-h-9 px-3 py-2 rounded-lg border border-border bg-background flex flex-col items-start sm:flex-row sm:items-center text-xs gap-2">
                         {linkedService ? (
                           <>
-                            <span className="text-foreground font-medium truncate">
-                              {linkedService.name?.slice(0, 40)}
+                            <span className="text-foreground font-medium break-words">
+                              {linkedService.name}
                             </span>
                             <Badge variant="outline" className="text-[10px] shrink-0 font-bold border-primary/30 text-primary">
                               ₹{displayPrice != null ? (Number(displayPrice) * 83.5).toFixed(2) : '?'}/1K
@@ -892,7 +893,7 @@ function BundleCard({
 
                   {/* Linked badge */}
                   {item.service_id && (
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex w-full sm:w-auto flex-wrap items-center gap-2 shrink-0">
                       <Badge className="bg-success/20 text-success text-[10px] gap-1 shrink-0">
                         <Link2 className="h-3 w-3" />
                         Linked
@@ -927,11 +928,11 @@ function BundleCard({
                   const currentInr =
                     item.price_per_k != null ? Number(item.price_per_k) * INR_RATE : null;
                   return (
-                    <div className="flex items-center gap-2 pl-12">
-                      <span className="text-xs text-muted-foreground shrink-0">
+                    <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:pl-12">
+                      <span className="text-xs leading-snug text-muted-foreground break-words">
                         Per 1000 {item.engagement_type}:
                       </span>
-                      <div className="flex items-center gap-1">
+                      <div className="flex w-full sm:w-auto items-center gap-1">
                         <span className="text-primary font-bold text-sm">₹</span>
                         <Input
                           type="number"
@@ -963,7 +964,7 @@ function BundleCard({
                               return n;
                             });
                           }}
-                          className="w-28 h-8 text-sm text-center px-2 rounded-lg font-bold text-primary border-primary/30"
+                          className="w-full sm:w-28 min-h-10 sm:min-h-8 text-sm text-center px-2 rounded-lg font-bold text-primary border-primary/30"
                           min={0}
                           step={0.01}
                         />

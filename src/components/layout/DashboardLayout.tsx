@@ -22,7 +22,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   return (
-    <div className="min-h-screen w-full bg-background text-foreground overflow-x-hidden selection:bg-primary/20 antialiased relative">
+    <div className="min-h-[100dvh] w-full min-w-0 bg-background text-foreground overflow-x-hidden selection:bg-primary/20 antialiased relative">
       {/* Ambient aurora + grid */}
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10">
         <div
@@ -62,9 +62,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="w-9" />
         </header>
 
-        <main className="w-full relative lg:pl-64">
-          <div className="min-h-screen pt-16 lg:pt-6 pb-10 px-3 sm:px-5 lg:px-8">
-            <div className="max-w-6xl mx-auto w-full">{children}</div>
+        <main className="w-full min-w-0 relative lg:pl-64">
+          <div className="min-h-[100dvh] pt-[calc(3.5rem+env(safe-area-inset-top))] lg:pt-6 pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-3 sm:px-5 lg:px-8">
+            <div className="max-w-6xl mx-auto w-full min-w-0">{children}</div>
           </div>
         </main>
       </div>

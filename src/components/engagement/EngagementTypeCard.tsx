@@ -311,11 +311,11 @@ export function EngagementTypeCard({
           ? "border-primary/30"
           : "border-border opacity-60"
     )}>
-      <CardContent className="p-2 sm:p-3 overflow-hidden">
+      <CardContent className="p-2 sm:p-3 overflow-hidden min-w-0">
         {/* Header Row - compact single line */}
-        <div className="flex items-center justify-between gap-1.5 sm:gap-2 min-w-0">
+        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 min-w-0">
           {/* Left: Icon + Label */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 basis-full sm:basis-auto">
             <div className={cn(
               "p-1 sm:p-1.5 rounded-lg sm:rounded-xl shrink-0",
               config.enabled ? "bg-card" : "bg-card"
@@ -328,7 +328,7 @@ export function EngagementTypeCard({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
                 <span className={cn(
-                  "text-xs sm:text-sm font-extrabold tracking-tight truncate",
+                  "text-xs sm:text-sm font-extrabold tracking-tight break-words sm:truncate",
                   engagementConfig.color
                 )}>
                   {engagementConfig.emoji} {engagementConfig.label}
@@ -351,7 +351,7 @@ export function EngagementTypeCard({
           </div>
 
           {/* Right: Input + Price + Switch */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-2 shrink-0 ml-0 sm:ml-auto">
             {config.enabled && (
               <Input
                 type="text"
@@ -361,12 +361,12 @@ export function EngagementTypeCard({
                 onChange={(e) => handleQuantityChange(e.target.value)}
                 onBlur={handleQuantityBlur}
                 className={cn(
-                  "w-14 sm:w-20 h-7 sm:h-8 text-xs sm:text-sm text-right bg-secondary border-2 border-border text-foreground font-bold px-1.5",
+                  "w-20 sm:w-20 h-9 sm:h-8 text-xs sm:text-sm text-right bg-secondary border-2 border-border text-foreground font-bold px-2",
                   hasError && "border-foreground"
                 )}
               />
             )}
-            <Badge variant="outline" className="font-black text-[10px] sm:text-xs border-border bg-card text-muted-foreground px-1.5 sm:px-2 py-0.5 sm:py-1 shrink-0">
+            <Badge variant="outline" className="max-w-[9rem] truncate font-black text-[10px] sm:text-xs border-border bg-card text-muted-foreground px-1.5 sm:px-2 py-0.5 sm:py-1 shrink-0">
               {formatPrice(config.price)}
             </Badge>
             <div className="scale-90 sm:scale-100">
@@ -381,7 +381,7 @@ export function EngagementTypeCard({
 
         {/* Quantity Limits - compact */}
         {config.enabled && (
-          <div className="mt-1 text-[10px] text-muted-foreground">
+          <div className="mt-1 text-[10px] text-muted-foreground break-words">
             <span>Min: {providerMin.toLocaleString()} • Max: {providerMax.toLocaleString()}</span>
             {hasError && (
               <span className="ml-2 text-foreground font-bold">
@@ -395,7 +395,7 @@ export function EngagementTypeCard({
         {config.enabled && !hasError && (
           <Collapsible>
             <CollapsibleTrigger asChild>
-              <button className="mt-2 w-full flex items-center justify-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors py-1 border-t border-border/40">
+              <button className="mt-2 min-h-8 w-full flex items-center justify-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors py-1 border-t border-border/40">
                 <Timer className="h-3 w-3" />
                 <span className="font-bold uppercase tracking-widest">Settings</span>
                 <ChevronDown className="h-3 w-3" />
