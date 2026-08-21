@@ -39,3 +39,8 @@ externalPort = 80
 deploymentTarget = "gce"
 run = ["sh", "-c", "node server/src/index.js"]
 build = ["npm", "run", "build"]
+
+[userenv]
+
+[userenv.production]
+NODE_ENV = "production"
