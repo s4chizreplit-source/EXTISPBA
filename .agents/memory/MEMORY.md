@@ -5,3 +5,4 @@
 - [Order placement migration](order-placement.md) — Order creation moved from Supabase edge function to Express REST API; table name bugs fixed; zapupi credit_wallet_zapupi stored proc replaced with direct SQL.
 - [Supabase removal](supabase-removal.md) — All non-admin Supabase client calls replaced with REST API; stub endpoints added for secondary features.
 - [Seed guard](seed-guard.md) — Engagement orders intentionally NOT re-seeded; sequence kept >= 3800; removal from seedAllData.js prevents post-truncate re-insertion.
+- [Production database isolation](production-db-isolation.md) — Live deployment data is separate from development; always verify production directly before declaring data fixes complete.

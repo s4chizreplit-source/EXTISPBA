@@ -108,6 +108,35 @@ export async function seedAllData() {
 
   // ── Engagement Orders ─────────────────────────────────────────────────────
   // NOTE: VPS order history intentionally NOT re-seeded (user requested clean slate).
+  // Production was initially published with 2,695 legacy order headers, while
+  // development had already been cleaned. Remove only that imported range.
+  // This is idempotent and can never touch new orders, which start at 3800.
+  try {
+    await query(
+      `DELETE FROM organic_run_schedule
+        WHERE engagement_order_item_id IN (
+          SELECT eoi.id
+            FROM engagement_order_items eoi
+            JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+           WHERE eo.order_number < 3800
+        )`
+    );
+    await query(
+      `DELETE FROM engagement_order_items
+        WHERE engagement_order_id IN (
+          SELECT id FROM engagement_orders WHERE order_number < 3800
+        )`
+    );
+    const removed = await query(
+      `DELETE FROM engagement_orders WHERE order_number < 3800`
+    );
+    if (removed.rowCount > 0) {
+      console.log(`[seed] removed ${removed.rowCount} legacy engagement orders (< 3800)`);
+    }
+  } catch (e) {
+    console.error('[seed] legacy engagement order cleanup failed:', e.message);
+  }
+
   // Sequence starts at 3800 so new orders don't collide with VPS order numbers.
   try {
     const { rows } = await query(`SELECT last_value FROM engagement_orders_order_number_seq`);
