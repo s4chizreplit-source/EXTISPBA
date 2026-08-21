@@ -107,7 +107,10 @@ async function processBatch() {
       LEFT JOIN service_provider_mapping spm
              ON spm.service_id = s.id AND spm.is_active = true
       LEFT JOIN provider_accounts pa
-             ON pa.id = spm.provider_account_id AND pa.is_active = true
+              ON pa.id = spm.provider_account_id
+             AND pa.is_active = true
+             AND NULLIF(TRIM(pa.api_key), '') IS NOT NULL
+             AND NULLIF(TRIM(pa.api_url), '') IS NOT NULL
       WHERE ors.id = ANY($1)
       ORDER BY ors.id, COALESCE(spm.sort_order, 999) ASC
     `, [ids]);
@@ -314,6 +317,8 @@ async function checkProcessingRuns() {
     WHERE ors.status = 'processing'
       AND ors.provider_order_id IS NOT NULL
       AND pa.is_active = true
+      AND NULLIF(TRIM(pa.api_key), '') IS NOT NULL
+      AND NULLIF(TRIM(pa.api_url), '') IS NOT NULL
       AND (ors.last_status_check IS NULL OR ors.last_status_check < now() - interval '30 seconds')
     ORDER BY ors.last_status_check ASC NULLS FIRST
     LIMIT $1

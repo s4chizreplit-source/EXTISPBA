@@ -1,4 +1,4 @@
-import { query, withTx } from '../db.js';
+import { withTx } from '../db.js';
 
 const PROVIDERS = [
   {
@@ -66,71 +66,87 @@ export async function seedProviderConfiguration() {
     APIGOUP_API_KEY: readSecret('APIGOUP_API_KEY'),
   };
 
-  const missing = Object.entries(keys).filter(([, value]) => !value).map(([name]) => name);
-  if (missing.length > 0) {
-    const { rows: [existing] } = await query(
-      `SELECT COUNT(*)::int AS cnt
-         FROM provider_accounts
-        WHERE id = ANY($1::uuid[])
-          AND is_active = true`,
-      [ACCOUNTS.map(account => account.id)]
-    );
-    if (Number(existing?.cnt || 0) < ACCOUNTS.length) {
-      console.warn(`[seed] provider setup waiting for Replit Secrets: ${missing.join(', ')}`);
-    }
-    return { configured: false, missing };
-  }
-
-  await withTx(async (client) => {
+  const readyAccounts = await withTx(async (client) => {
     for (const provider of PROVIDERS) {
-      const apiKey = keys[provider.secretName];
-      await client.query(
-        `INSERT INTO providers (id, name, api_url, api_key, is_active)
-         VALUES ($1, $2, $3, $4, true)
-         ON CONFLICT (id) DO UPDATE
-           SET name = EXCLUDED.name,
-               api_url = EXCLUDED.api_url,
-               api_key = EXCLUDED.api_key,
-               is_active = true,
-               updated_at = now()`,
+      const apiKey = keys[provider.secretName] || '';
+      const updated = await client.query(
+        `UPDATE providers
+            SET name = $2,
+                api_url = $3,
+                api_key = CASE WHEN $4 <> '' THEN $4 ELSE api_key END,
+                is_active = true,
+                updated_at = now()
+          WHERE id = $1`,
         [provider.id, provider.name, provider.apiUrl, apiKey]
       );
+      if (updated.rowCount === 0) {
+        await client.query(
+          `INSERT INTO providers (id, name, api_url, api_key, is_active)
+           VALUES ($1, $2, $3, $4, true)`,
+          [provider.id, provider.name, provider.apiUrl, apiKey]
+        );
+      }
     }
 
     for (const account of ACCOUNTS) {
-      const apiKey = keys[account.secretName];
-      await client.query(
-        `INSERT INTO provider_accounts
-           (id, provider_id, name, api_key, api_url, priority, is_active, delivery_multiplier)
-         VALUES ($1, $2, $3, $4, $5, $6, true, 1)
-         ON CONFLICT (id) DO UPDATE
-           SET provider_id = EXCLUDED.provider_id,
-               name = EXCLUDED.name,
-               api_key = EXCLUDED.api_key,
-               api_url = EXCLUDED.api_url,
-               priority = EXCLUDED.priority,
-               is_active = true,
-               updated_at = now()`,
+      const apiKey = keys[account.secretName] || '';
+      const updated = await client.query(
+        `UPDATE provider_accounts
+            SET provider_id = $2,
+                name = $3,
+                api_key = CASE WHEN $4 <> '' THEN $4 ELSE api_key END,
+                api_url = $5,
+                priority = $6,
+                updated_at = now()
+          WHERE id = $1`,
         [account.id, account.providerId, account.name, apiKey, account.apiUrl, account.priority]
       );
+      if (updated.rowCount === 0) {
+        await client.query(
+          `INSERT INTO provider_accounts
+             (id, provider_id, name, api_key, api_url, priority, is_active, delivery_multiplier)
+           VALUES ($1, $2, $3, $4, $5, $6, true, 1)`,
+          [account.id, account.providerId, account.name, apiKey, account.apiUrl, account.priority]
+        );
+      }
     }
 
     for (const [id, serviceId, accountId, providerServiceId] of MAPPINGS) {
-      await client.query(
-        `INSERT INTO service_provider_mapping
-           (id, service_id, provider_account_id, provider_service_id, sort_order, is_active)
-         VALUES ($1, $2, $3, $4, 1, true)
-         ON CONFLICT (id) DO UPDATE
-           SET service_id = EXCLUDED.service_id,
-               provider_account_id = EXCLUDED.provider_account_id,
-               provider_service_id = EXCLUDED.provider_service_id,
-               sort_order = EXCLUDED.sort_order,
-               is_active = true`,
+      const updated = await client.query(
+        `UPDATE service_provider_mapping
+            SET service_id = $2,
+                provider_account_id = $3,
+                provider_service_id = $4,
+                sort_order = 1,
+                is_active = true
+          WHERE id = $1`,
         [id, serviceId, accountId, providerServiceId]
       );
+      if (updated.rowCount === 0) {
+        await client.query(
+          `INSERT INTO service_provider_mapping
+             (id, service_id, provider_account_id, provider_service_id, sort_order, is_active)
+           VALUES ($1, $2, $3, $4, 1, true)`,
+          [id, serviceId, accountId, providerServiceId]
+        );
+      }
     }
+
+    const { rows: [ready] } = await client.query(
+      `SELECT COUNT(*)::int AS count
+         FROM provider_accounts
+        WHERE id = ANY($1::uuid[])
+          AND is_active = true
+          AND NULLIF(TRIM(api_key), '') IS NOT NULL
+          AND NULLIF(TRIM(api_url), '') IS NOT NULL`,
+      [ACCOUNTS.map(account => account.id)]
+    );
+    return Number(ready?.count || 0);
   });
 
-  console.log(`[seed] provider setup ready: ${ACCOUNTS.length} accounts, ${MAPPINGS.length} service mappings`);
-  return { configured: true, missing: [] };
+  console.log(
+    `[seed] provider admin setup ready: ${ACCOUNTS.length} accounts, ` +
+    `${MAPPINGS.length} service mappings, ${readyAccounts}/${ACCOUNTS.length} credentials active`
+  );
+  return { configured: readyAccounts === ACCOUNTS.length, readyAccounts };
 }

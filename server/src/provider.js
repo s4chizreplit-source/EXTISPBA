@@ -31,6 +31,8 @@ async function pickAccount() {
   const { rows } = await query(
     `SELECT id, api_url, api_key FROM provider_accounts
       WHERE is_active = true
+        AND NULLIF(TRIM(api_key), '') IS NOT NULL
+        AND NULLIF(TRIM(api_url), '') IS NOT NULL
       ORDER BY last_used_at ASC NULLS FIRST
       LIMIT 1`
   );
