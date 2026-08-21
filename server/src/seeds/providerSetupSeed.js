@@ -54,6 +54,10 @@ const MAPPINGS = [
   ['67cff1df-184f-4869-861f-99b9064de7ff', 'd222747b-710e-4df6-bcff-cd1c2bdad75c', '7cf9511f-cbdc-4717-8f5d-98fd61f65684', '2760'],
   ['27950a6a-ea6c-49a6-bc35-b37ae651a35a', 'e541a345-90b6-4f0c-9d3e-0a86cd4ad462', '7cf9511f-cbdc-4717-8f5d-98fd61f65684', '5291'],
   ['245c64f6-33b0-48cd-9e19-d971e6e3bd42', 'f252ac46-2c6e-4982-8777-9baf44ba3f4a', '7cf9511f-cbdc-4717-8f5d-98fd61f65684', '5031'],
+  ['b3eb5cc3-1b50-45c2-a8f4-2161a3ed2840', '6ef3fdf5-5d2d-43b9-bbf2-593421550e69', '4e88d3c2-463a-41c6-a8d6-e5b06e0b8608', '13125'],
+  ['44139003-714a-4c64-a342-08f2588c64ad', '8ccbe86b-43d2-47ba-b29d-a890a1a01294', '4e88d3c2-463a-41c6-a8d6-e5b06e0b8608', '13636'],
+  ['f7d060fb-19b7-404e-ba98-042bac164539', '917e939a-fdaa-486f-9bc0-28e2d8fb56dd', '4e88d3c2-463a-41c6-a8d6-e5b06e0b8608', '11674'],
+  ['6705bf09-b94a-4193-9b53-a3af8ad98677', 'cbd2bbd6-c64d-4e85-8f74-3cd4ec2e029c', '4e88d3c2-463a-41c6-a8d6-e5b06e0b8608', '13636'],
 ];
 
 function readSecret(name) {
@@ -112,6 +116,11 @@ export async function seedProviderConfiguration() {
     }
 
     for (const [id, serviceId, accountId, providerServiceId] of MAPPINGS) {
+      const accountExists = await client.query(
+        `SELECT 1 FROM provider_accounts WHERE id = $1`,
+        [accountId]
+      );
+      if (accountExists.rowCount === 0) continue;
       const updated = await client.query(
         `UPDATE service_provider_mapping
             SET service_id = $2,

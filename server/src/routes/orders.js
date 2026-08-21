@@ -119,6 +119,7 @@ router.post(
     // 2) Send to provider outside the transaction; failure refunds the user.
     try {
       const { providerOrderId } = await placeProviderOrder({
+        serviceId: created.service.id,
         providerServiceId: created.service.provider_service_id,
         link,
         quantity,
@@ -206,7 +207,7 @@ router.get(
 
     if (!TERMINAL.has(order.status) && order.provider_order_id) {
       try {
-        const live = await fetchProviderStatus(order.provider_order_id);
+        const live = await fetchProviderStatus(order.provider_order_id, order.service_id);
         if (live) {
           const updated = await query(
             `UPDATE orders

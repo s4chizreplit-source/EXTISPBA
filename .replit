@@ -36,8 +36,8 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "gce"
-run = ["sh", "-c", "node server/src/index.js"]
+deploymentTarget = "vm"
+run = ["node", "server/src/index.js"]
 build = ["npm", "run", "build"]
 
 [userenv]

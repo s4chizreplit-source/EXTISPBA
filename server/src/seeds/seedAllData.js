@@ -52,12 +52,6 @@ export async function seedAllData() {
   // One-time historical reporting baseline. This changes only the admin
   // aggregate; wallet balances and transaction history remain untouched.
   try {
-    await query(`
-      ALTER TABLE public.platform_settings
-        ADD COLUMN IF NOT EXISTS funds_added_baseline_inr numeric(14, 2),
-        ADD COLUMN IF NOT EXISTS funds_added_baseline_count integer,
-        ADD COLUMN IF NOT EXISTS funds_added_baseline_at timestamptz
-    `);
     const baseline = await query(
       `UPDATE public.platform_settings
           SET funds_added_baseline_inr = $1,

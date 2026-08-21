@@ -212,9 +212,13 @@ router.post(
          VALUES ($1, $2, now() + interval '1 hour')`,
         [token, rows[0].id]
       );
-      resetUrl = `${process.env.PUBLIC_APP_URL || ''}/reset-password?token=${token}`;
+      const configuredBaseUrl = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
+      const requestBaseUrl = `${req.protocol}://${req.get('host')}`;
+      resetUrl = `${configuredBaseUrl || requestBaseUrl}/reset-password?token=${token}`;
       // No mailer is bundled. Wire your SMTP/provider here; the link is logged for now.
-      console.log(`[password-reset] ${req.valid.email} -> ${resetUrl}`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[password-reset] generated development reset link for ${req.valid.email}`);
+      }
     }
     // Always the same answer so emails can't be enumerated.
     res.json({ ok: true, ...(process.env.EXPOSE_RESET_LINK === 'true' && resetUrl ? { resetUrl } : {}) });

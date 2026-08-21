@@ -19,15 +19,17 @@
  */
 
 import { query, withTx } from './db.js';
+import { getEnvProvider, isValidProviderApiUrl } from './provider-config.js';
 
 const BATCH_SIZE        = 25;
 const TICK_MS           = 15_000;
 const STATUS_BATCH_SIZE = 50;   // how many 'processing' runs to status-check per tick
 const MIN_LIVE_ORDER_NUMBER = 3800;
-const ENV_PROVIDER_URL  = String(process.env.PROVIDER_API_URL || '').trim();
-const ENV_PROVIDER_KEY  = String(process.env.PROVIDER_API_KEY || '').trim();
+const ENV_PROVIDER      = getEnvProvider();
+const ENV_PROVIDER_URL  = ENV_PROVIDER?.api_url || '';
+const ENV_PROVIDER_KEY  = ENV_PROVIDER?.api_key || '';
 const ENV_PROVIDER_NAME = String(process.env.PROVIDER_NAME || 'Primary Provider').trim();
-const HAS_ENV_PROVIDER  = Boolean(ENV_PROVIDER_URL && ENV_PROVIDER_KEY);
+const HAS_ENV_PROVIDER  = Boolean(ENV_PROVIDER);
 
 /** True when the provider error means "same link is already active". */
 function isActiveLinkError(msg = '') {
@@ -41,6 +43,9 @@ function isActiveLinkError(msg = '') {
 
 /** Low-level HTTP call to one SMM panel account. */
 async function callAccount({ api_url, api_key }, params, timeoutMs = 20_000) {
+  if (!isValidProviderApiUrl(api_url)) {
+    throw new Error('Provider API URL is not a valid HTTP(S) endpoint');
+  }
   const ctrl  = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
