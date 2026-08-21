@@ -94,15 +94,16 @@ export default function ZapUpiDepositCard() {
   }
 
   return (
-    <div className="relative rounded-2xl bg-card border border-border p-6 backdrop-blur-md shadow-[0_20px_60px_-20px_rgba(124,58,237,0.2)]">
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white via-sky-50 to-blue-100/70 border border-sky-200 p-6 backdrop-blur-md shadow-[0_20px_60px_-24px_rgba(37,99,235,0.42)]">
+      <div aria-hidden className="pointer-events-none absolute -top-24 -right-16 h-48 w-48 rounded-full bg-cyan-300/30 blur-3xl" />
       <div className="relative flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-card border border-border flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 border border-sky-400 flex items-center justify-center shadow-md">
             <Zap className="w-4 h-4 text-white" fill="white" />
           </div>
           <div>
-            <h3 className="text-[15px] font-semibold text-white leading-tight">Pay with UPI</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">GPay · PhonePe · Paytm · BHIM</p>
+            <h3 className="text-[15px] font-semibold text-slate-900 leading-tight">Pay with UPI</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">GPay · PhonePe · Paytm · BHIM</p>
           </div>
         </div>
         <span className="px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[9px] font-semibold uppercase tracking-wider">
@@ -112,9 +113,9 @@ export default function ZapUpiDepositCard() {
 
       <div className="relative space-y-4">
         <div>
-          <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground ml-1">Amount</label>
+          <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-800 ml-1">Amount</label>
           <div className="mt-1.5 relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-semibold text-muted-foreground">₹</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-semibold text-sky-700">₹</span>
             <input
               type="number"
               inputMode="numeric"
@@ -123,9 +124,9 @@ export default function ZapUpiDepositCard() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0"
-              className="w-full bg-card border border-border rounded-xl py-3.5 pl-10 pr-16 text-xl font-bold tracking-tight text-white outline-none focus:border-border focus:bg-card transition-all placeholder:text-muted-foreground"
+              className="w-full bg-white/85 border border-sky-200 rounded-xl py-3.5 pl-10 pr-16 text-xl font-bold tracking-tight text-slate-900 outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-200/50 transition-all placeholder:text-slate-400"
             />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-muted-foreground tracking-wider">INR</span>
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-500 tracking-wider">INR</span>
           </div>
         </div>
 
@@ -139,8 +140,8 @@ export default function ZapUpiDepositCard() {
                 className={
                   'py-2.5 rounded-lg text-xs font-semibold transition-all border ' +
                   (active
-                    ? 'bg-card border-border text-white'
-                    : 'bg-card border-border text-muted-foreground hover:bg-card hover:border-border hover:text-foreground')
+                    ? 'bg-gradient-to-r from-sky-500 to-blue-600 border-blue-500 text-white shadow-sm'
+                    : 'bg-white/75 border-sky-200 text-slate-600 hover:bg-sky-100 hover:border-sky-300 hover:text-sky-800')
                 }
               >
                 ₹{q >= 1000 ? `${q / 1000}k` : q}
@@ -152,7 +153,7 @@ export default function ZapUpiDepositCard() {
         <button
           onClick={handlePay}
           disabled={loading || polling}
-          className="relative w-full py-3.5 rounded-xl font-semibold text-black flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-60 bg-white hover:bg-primary shadow-[0_10px_24px_rgba(29,78,216,0.25)]"
+          className="relative w-full py-3.5 rounded-xl font-semibold text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-60 bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 shadow-[0_12px_26px_rgba(37,99,235,0.35)]"
         >
           {loading ? (<><Loader2 className="w-4 h-4 animate-spin" /> <span>Opening UPI…</span></>)
             : polling ? (<><Loader2 className="w-4 h-4 animate-spin" /> <span>Verifying…</span></>)
@@ -161,7 +162,7 @@ export default function ZapUpiDepositCard() {
 
         <div className="flex items-center justify-center gap-1.5 pt-1">
           <div className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-          <p className="text-[10px] text-muted-foreground font-medium">Auto-credit in seconds · No manual approval</p>
+          <p className="text-[10px] text-slate-600 font-medium">Auto-credit in seconds · No manual approval</p>
         </div>
       </div>
     </div>
