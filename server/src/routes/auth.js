@@ -27,62 +27,41 @@ function publicUser(row) {
 }
 
 async function importedUserByEmail(email) {
-  // Try public.auth_users first (works in all environments including production).
-  // Fall back to auth.users for dev environments that haven't migrated yet.
-  for (const tbl of ['public.auth_users', 'auth.users']) {
-    try {
-      const { rows } = await query(
-        `SELECT u.id, u.email, u.encrypted_password, u.raw_user_meta_data, u.created_at,
-                p.full_name AS profile_full_name,
-                COALESCE(
-                  (SELECT ur.role::text FROM public.user_roles ur
-                    WHERE ur.user_id = u.id
-                    ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END LIMIT 1),
-                  'user'
-                ) AS role
-           FROM ${tbl} u
-           LEFT JOIN public.profiles p ON p.user_id = u.id
-          WHERE lower(u.email) = $1
-          LIMIT 1`,
-        [email]
-      );
-      if (rows[0]) return rows[0];
-      // Table exists but no row — stop searching
-      return null;
-    } catch (e) {
-      if (e.code === '42P01') continue; // table missing, try next
-      throw e;
-    }
-  }
-  return null;
+  const { rows } = await query(
+    `SELECT u.id, u.email, u.encrypted_password, u.raw_user_meta_data, u.created_at,
+            p.full_name AS profile_full_name,
+            COALESCE(
+              (SELECT ur.role::text FROM public.user_roles ur
+                WHERE ur.user_id = u.id
+                ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END LIMIT 1),
+              'user'
+            ) AS role
+       FROM public.auth_users u
+       LEFT JOIN public.profiles p ON p.user_id = u.id
+      WHERE lower(u.email) = $1
+      LIMIT 1`,
+    [email]
+  );
+  return rows[0] || null;
 }
 
 async function importedUserById(id) {
-  for (const tbl of ['public.auth_users', 'auth.users']) {
-    try {
-      const { rows } = await query(
-        `SELECT u.id, u.email, u.encrypted_password, u.raw_user_meta_data, u.created_at,
-                p.full_name AS profile_full_name,
-                COALESCE(
-                  (SELECT ur.role::text FROM public.user_roles ur
-                    WHERE ur.user_id = u.id
-                    ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END LIMIT 1),
-                  'user'
-                ) AS role
-           FROM ${tbl} u
-           LEFT JOIN public.profiles p ON p.user_id = u.id
-          WHERE u.id = $1
-          LIMIT 1`,
-        [id]
-      );
-      if (rows[0]) return rows[0];
-      return null;
-    } catch (e) {
-      if (e.code === '42P01') continue;
-      throw e;
-    }
-  }
-  return null;
+  const { rows } = await query(
+    `SELECT u.id, u.email, u.encrypted_password, u.raw_user_meta_data, u.created_at,
+            p.full_name AS profile_full_name,
+            COALESCE(
+              (SELECT ur.role::text FROM public.user_roles ur
+                WHERE ur.user_id = u.id
+                ORDER BY CASE WHEN ur.role::text = 'admin' THEN 0 ELSE 1 END LIMIT 1),
+              'user'
+            ) AS role
+       FROM public.auth_users u
+       LEFT JOIN public.profiles p ON p.user_id = u.id
+      WHERE u.id = $1
+      LIMIT 1`,
+    [id]
+  );
+  return rows[0] || null;
 }
 
 async function importedUserData(userId) {
@@ -118,22 +97,6 @@ router.post(
          VALUES (gen_random_uuid(), $1, $2, $3)
          RETURNING id, email, created_at`,
         [email, hash, JSON.stringify({ full_name: fullName || '', role })]
-      );
-
-      // Keep the imported auth schema as the FK identity anchor while the
-      // application authenticates against public.auth_users.
-      await client.query(
-        `INSERT INTO auth.users
-           (id, email, encrypted_password, raw_user_meta_data, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $5)
-         ON CONFLICT (id) DO NOTHING`,
-        [
-          inserted.id,
-          email,
-          hash,
-          JSON.stringify({ full_name: fullName || '', role }),
-          inserted.created_at,
-        ]
       );
 
       // Role stored in user_roles table (same pattern as VPS users)
