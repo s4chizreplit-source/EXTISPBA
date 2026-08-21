@@ -40,14 +40,48 @@ async function zapCall(url, params) {
   return r2.data;
 }
 
-/** Credit wallet using DB function (idempotent — safe to call multiple times) */
+/** Credit wallet — idempotent, atomic. Replaces the missing credit_wallet_zapupi() stored procedure. */
 async function creditWallet({ userId, orderId, amountInr, txnId, utr }) {
   const amountUsd = Number((amountInr / USD_RATE).toFixed(4));
-  const { rows } = await query(
-    `SELECT * FROM credit_wallet_zapupi($1, $2, $3, $4, $5, $6)`,
-    [userId, orderId, amountUsd, amountInr, txnId || null, utr || null]
-  );
-  return rows[0];
+
+  return withTx(async (client) => {
+    // Idempotency check — if already credited, skip
+    const { rows: dep } = await client.query(
+      `SELECT credited FROM zapupi_deposits WHERE order_id=$1 FOR UPDATE`,
+      [orderId]
+    );
+    if (!dep[0] || dep[0].credited) return dep[0];
+
+    // Mark deposit as credited
+    await client.query(
+      `UPDATE zapupi_deposits
+          SET credited=true, status='success', amount_usd=$1,
+              txn_id=COALESCE($2, txn_id), utr=COALESCE($3, utr),
+              updated_at=now()
+        WHERE order_id=$4`,
+      [amountUsd, txnId || null, utr || null, orderId]
+    );
+
+    // Credit the wallet
+    const { rows: [wallet] } = await client.query(
+      `UPDATE wallets
+          SET balance = balance + $1, updated_at = now()
+        WHERE user_id = $2
+        RETURNING balance`,
+      [amountUsd, userId]
+    );
+
+    // Record the transaction
+    await client.query(
+      `INSERT INTO transactions (user_id, type, amount, balance_after, status, description)
+       VALUES ($1, 'deposit', $2, $3, 'completed', $4)
+       ON CONFLICT DO NOTHING`,
+      [userId, amountUsd, wallet?.balance ?? amountUsd, `ZapUPI deposit ₹${amountInr} (${orderId})`]
+    );
+
+    console.log(`[zapupi] ✅ Wallet credited $${amountUsd} (₹${amountInr}) for user ${userId}`);
+    return { credited: true, amountUsd, amountInr };
+  });
 }
 
 // ─── POST /api/zapupi/create-order ───────────────────────────────────────────
