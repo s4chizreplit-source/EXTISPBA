@@ -10,6 +10,7 @@ import { BUNDLE_ITEMS_SEED, BUNDLE_ITEM_CONFIG_SEED } from './bundleItemsSeed.js
 import { BUNDLE_SERVICES_SEED } from './bundleServicesSeed.js';
 import { seedProviderConfiguration } from './providerSetupSeed.js';
 import { seedHistoricalOrderData } from './historicalOrderSeed.js';
+import { seedPreviewOrderMigration } from './previewOrderMigrationSeed.js';
 
 const CHUNK = 50; // smaller batches = safer on prod
 const FUNDS_ADDED_BASELINE_INR = 95234;
@@ -194,6 +195,10 @@ export async function seedAllData() {
   }
 
   // ── Engagement Orders ─────────────────────────────────────────────────────
+  // Move the approved Preview campaign before opening engagement-order writes.
+  // The source UUID makes this idempotent; production assigns the next number.
+  await seedPreviewOrderMigration();
+
   // Historical VPS orders remain read-only. The dispatcher ignores order
   // numbers below 3800. Replit's bulk publish can skip this large related table
   // group, so an idempotent archive seed restores it when history is empty.
