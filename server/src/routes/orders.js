@@ -175,7 +175,7 @@ router.get(
     const { status, limit } = req.valid;
     const { rows } = await query(
       `SELECT o.id, o.order_number, o.status, o.price, o.link, o.quantity, o.created_at,
-              s.name AS service_name, s.platform AS service_category
+              s.name AS service_name, s.category AS service_category
          FROM orders o LEFT JOIN services s ON s.id = o.service_id
         WHERE o.user_id = $1 AND ($2 = 'all' OR o.status = $2)
         ORDER BY o.created_at DESC LIMIT $3`,
@@ -192,7 +192,7 @@ router.get(
   validate(z.object({ id: z.string().uuid() }), 'params'),
   ah(async (req, res) => {
     const { rows } = await query(
-      `SELECT o.*, s.name AS service_name, s.platform
+      `SELECT o.*, s.name AS service_name, s.category AS service_platform
          FROM orders o JOIN services s ON s.id = o.service_id
         WHERE o.id = $1 AND o.user_id = $2`,
       [req.valid.id, req.session.userId]

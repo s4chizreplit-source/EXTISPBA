@@ -19,24 +19,25 @@ router.get(
   ah(async (req, res) => {
     const { platform, search } = req.valid;
     const { rows } = await query(
-      `SELECT id, platform, category, name, description, price_per_1k,
+      `SELECT id, category, name, description, price,
               min_quantity, max_quantity
          FROM services
         WHERE is_active = true
-          AND ($1 = 'all' OR platform = $1)
+          AND ($1 = 'all' OR category ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%')
           AND ($2::text IS NULL OR name ILIKE '%' || $2 || '%' OR category ILIKE '%' || $2 || '%')
-        ORDER BY platform, category, price_per_1k`,
+        ORDER BY category, price`,
       [platform, search || null]
     );
     res.json({
       platforms: PLATFORMS,
       services: rows.map((r) => ({
         id: r.id,
-        platform: r.platform,
+        platform: r.category,
         category: r.category,
         name: r.name,
         description: r.description,
-        pricePer1k: Number(r.price_per_1k),
+        price: Number(r.price),
+        pricePer1k: Number(r.price) * 1000,
         minQuantity: r.min_quantity,
         maxQuantity: r.max_quantity,
       })),

@@ -47,24 +47,15 @@ export default function MyPosts() {
   const { data: rows = [], isLoading } = useQuery({
     queryKey: igQueryKeys.postsSummary(user?.id, selectedAccountId),
     queryFn: async () => {
-      let mediaQuery = supabase
-        .from('instagram_media')
-        .select('media_id,shortcode,permalink,thumbnail_url,media_type,caption,posted_at,account_id,instagram_accounts!inner(username)')
-        .eq('user_id', user!.id)
-        .order('posted_at', { ascending: false, nullsFirst: false });
+      const mediaUrl = selectedAccountId
+        ? `/api/instagram/media?account_id=${selectedAccountId}`
+        : `/api/instagram/media`;
+      const mediaRes = await fetch(mediaUrl);
+      const media = mediaRes.ok ? await mediaRes.json() : [];
 
-      if (selectedAccountId) mediaQuery = mediaQuery.eq('account_id', selectedAccountId);
-
-      const { data: media, error: mediaError } = await mediaQuery.limit(100);
-      if (mediaError) throw mediaError;
-
-      const { data: orders, error: ordersError } = await supabase
-        .from('engagement_orders')
-        .select('link,status,total_price')
-        .eq('user_id', user!.id)
-        .order('created_at', { ascending: false })
-        .limit(500);
-      if (ordersError) throw ordersError;
+      const ordersRes = await fetch('/api/engagement-orders?limit=500');
+      const ordersPayload = ordersRes.ok ? await ordersRes.json() : {};
+      const orders = Array.isArray(ordersPayload) ? ordersPayload : (ordersPayload.orders ?? []);
 
       return (media ?? []).map((m: any) => {
         const matchingOrders = (orders ?? []).filter((o: any) => {

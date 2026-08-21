@@ -205,32 +205,17 @@ export function LiveChatWidget() {
     queryFn: async () => {
       if (!user) return null;
 
-      // Get MOST RECENT conversation regardless of status (never lose history)
-      const { data: existing, error: fetchError } = await supabase
-        .from('chat_conversations')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (fetchError) throw fetchError;
-      if (existing) return existing as ChatConversation;
-
-      // Only create new conversation if NONE exists at all
-      const { data: newConv, error: createError } = await supabase
-        .from('chat_conversations')
-        .insert({
-          user_id: user.id,
+      // Get or create most recent conversation via REST
+      const res = await fetch('/api/chat/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           user_email: profile?.email || user.email || '',
           user_name: profile?.full_name || null,
-          status: 'open',
-        })
-        .select()
-        .single();
-
-      if (createError) throw createError;
-      return newConv as ChatConversation;
+        }),
+      });
+      if (!res.ok) return null;
+      return await res.json() as ChatConversation;
     },
     enabled: !!user && isOpen,
   });

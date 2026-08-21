@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, memo, lazy, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useGlobalMarkup } from "@/hooks/useGlobalMarkup";
@@ -224,13 +223,13 @@ export default function EngagementOrder() {
   const { data: allServices } = useQuery({
     queryKey: ['all-active-services'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('services')
-        .select('id, name, price, min_quantity, max_quantity, category')
-        .eq('is_active', true)
-        .order('price', { ascending: true });
-      if (error) throw error;
-      return data;
+      const res = await fetch('/api/services');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (Array.isArray(data) ? data : (data.services ?? [])) as Array<{
+        id: string; name: string; price: number;
+        min_quantity: number; max_quantity: number; category: string;
+      }>;
     },
     staleTime: 5 * 60 * 1000,
   });

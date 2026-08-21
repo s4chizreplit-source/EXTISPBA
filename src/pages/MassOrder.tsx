@@ -126,13 +126,10 @@ export default function MassOrder() {
   const { data: bundles } = useQuery({
     queryKey: ["mass-order-bundles-all"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("engagement_bundles")
-        .select(`*, items:bundle_items(*, service:services(id, name, price, min_quantity))`)
-        .eq("is_active", true)
-        .order("sort_order");
-      if (error) throw error;
-      return data as any[];
+      const res = await fetch('/api/bundles');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (Array.isArray(data) ? data : []) as any[];
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -168,14 +165,10 @@ export default function MassOrder() {
     queryKey: ["mass-order-batches", user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data, error } = await supabase
-        .from("mass_order_batches")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (error) throw error;
-      return data as any[];
+      const res = await fetch('/api/mass-orders/batches');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (Array.isArray(data) ? data : (data.batches ?? [])) as any[];
     },
     enabled: !!user,
     staleTime: 10 * 1000,
@@ -185,13 +178,10 @@ export default function MassOrder() {
     queryKey: ["mass-order-batch-items", viewingBatchId],
     queryFn: async () => {
       if (!viewingBatchId) return [];
-      const { data, error } = await supabase
-        .from("mass_order_batch_items")
-        .select("*")
-        .eq("batch_id", viewingBatchId)
-        .order("created_at");
-      if (error) throw error;
-      return data as any[];
+      const res = await fetch(`/api/mass-orders/batch-items?batch_id=${viewingBatchId}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (Array.isArray(data) ? data : []) as any[];
     },
     enabled: !!viewingBatchId,
   });
@@ -278,30 +268,27 @@ export default function MassOrder() {
     setProgress({ done: 0, total: cards.length });
 
 
-    const { data: batchRow, error: batchErr } = await supabase
-      .from("mass_order_batches")
-      .insert({
-        user_id: user.id,
+    const batchRes = await fetch('/api/mass-orders/batches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         name: campaignName.trim() || `Batch ${new Date().toLocaleString()}`,
         platform: bundle.platform,
         total_count: cards.length,
-        status: "processing",
         total_price: totalCost,
-      })
-      .select()
-      .single();
+      }),
+    });
+    const batchRow = batchRes.ok ? await batchRes.json() : null;
 
-    if (batchErr || !batchRow) {
-      toast({ title: "Failed to start batch", description: batchErr?.message, variant: "destructive" });
+    if (!batchRow?.id) {
+      toast({ title: "Failed to start batch", description: "Could not create batch record", variant: "destructive" });
       setSubmitting(false);
       return;
     }
 
     const itemsToInsert = cards.map((c) => ({
       batch_id: batchRow.id,
-      user_id: user.id,
       link: c.link,
-      status: "pending",
       price: cardCost(c),
       payload: {
         baseQty: c.baseQty,
@@ -312,12 +299,14 @@ export default function MassOrder() {
         timeframe: c.timeframe,
       },
     }));
-    const { data: insertedItems } = await supabase
-      .from("mass_order_batch_items")
-      .insert(itemsToInsert)
-      .select();
+    const itemsRes = await fetch('/api/mass-orders/batch-items/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: itemsToInsert }),
+    }).catch(() => null);
+    const insertedItems = itemsRes?.ok ? await itemsRes.json() : [];
     const itemByLink = new Map<string, any>();
-    (insertedItems || []).forEach((it: any) => itemByLink.set(it.link, it));
+    (Array.isArray(insertedItems) ? insertedItems : (insertedItems?.items ?? [])).forEach((it: any) => itemByLink.set(it.link, it));
 
     let okCount = 0, failCount = 0;
 

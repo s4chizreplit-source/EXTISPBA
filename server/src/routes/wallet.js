@@ -35,7 +35,7 @@ router.get(
   ah(async (req, res) => {
     const { type, limit } = req.valid;
     const { rows } = await query(
-      `SELECT id, type, amount, balance_after, description, reference, order_id, created_at
+      `SELECT id, type, amount, balance_after, description, payment_reference AS reference, order_id, created_at
          FROM transactions
         WHERE user_id = $1 AND ($2 = 'all' OR type = $2)
         ORDER BY created_at DESC

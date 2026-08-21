@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -120,14 +119,10 @@ export default function Support() {
     queryKey: ['support-tickets', user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      return data;
+      const res = await fetch('/api/support/tickets');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.tickets ?? []);
     },
     enabled: !!user,
   });
@@ -139,20 +134,13 @@ export default function Support() {
       if (!subject.trim()) throw new Error('Please enter a subject');
       if (!message.trim()) throw new Error('Please describe your issue');
 
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .insert({
-          user_id: user.id,
-          subject: subject.trim(),
-          message: message.trim(),
-          category,
-          priority,
-          status: 'open',
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const res = await fetch('/api/support/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: subject.trim(), message: message.trim(), category, priority }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to create ticket');
       return data;
     },
     onSuccess: () => {
