@@ -5,6 +5,7 @@
 import express from 'express';
 import { query, withTx } from '../db.js';
 import { requireAuth, ah } from '../middleware/auth.js';
+import { areEngagementOrderWritesReady } from '../seeds/historicalOrderSeed.js';
 
 const router = express.Router();
 
@@ -289,7 +290,16 @@ export function generateRunSchedule(
 
 // ── POST /api/engagement-orders/create ───────────────────────────────────────
 
-router.post('/create', requireAuth, ah(async (req, res) => {
+function requireEngagementOrderReadiness(_req, res, next) {
+  if (!areEngagementOrderWritesReady()) {
+    return res.status(503).json({
+      error: 'Order system is finishing startup. Please retry shortly.',
+    });
+  }
+  next();
+}
+
+router.post('/create', requireAuth, requireEngagementOrderReadiness, ah(async (req, res) => {
   const userId = req.session.userId;
   const { bundle_id, link, base_quantity, total_price, is_organic_mode, engagements, campaign_name } = req.body;
 

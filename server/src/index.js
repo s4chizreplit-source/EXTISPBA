@@ -166,9 +166,12 @@ app.use((err, _req, res, _next) => {
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`OrganicSMM Pro API listening on :${PORT}`);
-  seedAuthUsers().catch(e => console.error('[seed] auth error:', e.message));
-  seedAllData().catch(e => console.error('[seed] data error:', e.message));
-  startCron();
+  seedAuthUsers()
+    .then(() => seedAllData())
+    .then(() => startCron())
+    .catch(e => {
+      console.error('[startup] critical data readiness failed:', e.message);
+    });
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
