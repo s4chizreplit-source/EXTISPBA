@@ -36,6 +36,6 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "autoscale"
+deploymentTarget = "gce"
 run = ["sh", "-c", "node server/src/index.js"]
 build = ["npm", "run", "build"]
