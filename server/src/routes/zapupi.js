@@ -114,11 +114,19 @@ router.post('/create-order', requireAuth, ah(async (req, res) => {
     [userId, orderId, amountInr]
   );
 
-  // Determine origin for redirect URLs
+  // Determine origin for redirect URLs.
+  // Priority: PUBLIC_APP_URL > REPLIT_DOMAINS (production) > REPLIT_DEV_DOMAIN (dev) > request header.
   const configuredOrigin = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\/+$/, '');
-  const origin = configuredOrigin || (req.headers.origin || req.headers.referer || '').replace(/\/$/, '');
+  const replitProdDomain = String(process.env.REPLIT_DOMAINS || '').split(',').map(d => d.trim()).find(Boolean);
+  const replitDevDomain  = String(process.env.REPLIT_DEV_DOMAIN || '').trim();
+  const autoOrigin = replitProdDomain
+    ? `https://${replitProdDomain}`
+    : replitDevDomain
+      ? `https://${replitDevDomain}`
+      : (req.headers.origin || req.headers.referer || '').replace(/\/$/, '');
+  const origin = configuredOrigin || autoOrigin;
   if (!origin) return res.status(503).json({ error: 'Public application URL is not configured' });
-  const webhookUrl = `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : origin}/api/zapupi/webhook`;
+  const webhookUrl = `${origin}/api/zapupi/webhook`;
 
   const payload = {
     zap_key: ZAP_KEY,
