@@ -9,11 +9,12 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run && npm run test:historical-seed && npm run test:minimum-scheduling && npm run test:database-backup && npm run test:database-mirror",
+    "test": "vitest run && npm run test:historical-seed && npm run test:minimum-scheduling && npm run test:database-backup && npm run test:database-mirror && npm run test:app-secret",
     "test:historical-seed": "node --test server/test/historicalOrderSeed.integration.test.js",
     "test:minimum-scheduling": "node --test server/test/providerMinimum.test.js",
     "test:database-backup": "node --test server/test/databaseBackup.test.js",
     "test:database-mirror": "node --test server/test/databaseMirror.test.js",
+    "test:app-secret": "node --test server/test/appSecret.test.js",
     "mirror:database": "node scripts/run-database-mirror.js",
     "test:watch": "vitest"
   },

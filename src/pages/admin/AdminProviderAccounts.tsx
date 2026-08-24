@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Edit, Trash2, Key, Clock, Link as LinkIcon, ArrowLeft, Wallet, RefreshCw, AlertTriangle } from "lucide-react";
+import { Plus, Edit, Trash2, Key, Clock, Link as LinkIcon, ArrowLeft, Wallet, RefreshCw, AlertTriangle, ShieldCheck, Save, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useNavigate } from "react-router-dom";
 
@@ -39,12 +39,19 @@ interface Provider {
   api_url: string;
 }
 
+interface ZapupiSettings {
+  configured: boolean;
+  source: "custom" | "environment" | "none";
+  updated_at: string | null;
+}
+
 export default function AdminProviderAccounts() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<ProviderAccount | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [zapupiApiKey, setZapupiApiKey] = useState("");
 
   // Form state
   const [formData, setFormData] = useState({
@@ -74,6 +81,37 @@ export default function AdminProviderAccounts() {
       const res = await fetch("/api/admin/provider-accounts", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load provider accounts");
       return res.json() as Promise<ProviderAccount[]>;
+    },
+  });
+
+  const { data: zapupiSettings } = useQuery({
+    queryKey: ["zapupi-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/zapupi-settings", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load ZapUPI settings");
+      return res.json() as Promise<ZapupiSettings>;
+    },
+  });
+
+  const saveZapupiKeyMutation = useMutation({
+    mutationFn: async (apiKey: string) => {
+      const res = await fetch("/api/admin/zapupi-settings", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update ZapUPI API key");
+      return data as ZapupiSettings;
+    },
+    onSuccess: async () => {
+      setZapupiApiKey("");
+      await queryClient.invalidateQueries({ queryKey: ["zapupi-settings"] });
+      toast.success("ZapUPI API key updated securely");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to update ZapUPI API key");
     },
   });
 
@@ -348,6 +386,78 @@ export default function AdminProviderAccounts() {
             </DialogContent>
           </Dialog>
         </div>
+
+        <Card className="overflow-hidden border-sky-200 bg-gradient-to-br from-sky-50 via-background to-blue-50">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveZapupiKeyMutation.mutate(zapupiApiKey.trim());
+            }}
+          >
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-600 text-white shadow-sm">
+                    <Key className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle className="text-lg">ZapUPI API Key</CardTitle>
+                    <CardDescription className="mt-1 leading-relaxed">
+                      Enter a new key to replace the key used for UPI deposits. The current key is never shown.
+                    </CardDescription>
+                  </div>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={zapupiSettings?.configured
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                    : "border-amber-300 bg-amber-50 text-amber-700"}
+                >
+                  <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                  {zapupiSettings?.configured ? "Configured" : "Not configured"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Label htmlFor="zapupi-api-key">New ZapUPI API Key</Label>
+                  <Input
+                    id="zapupi-api-key"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Paste the new ZapUPI API key"
+                    value={zapupiApiKey}
+                    onChange={(event) => setZapupiApiKey(event.target.value)}
+                    minLength={8}
+                    maxLength={1024}
+                    required
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full gap-2 sm:w-auto"
+                  disabled={zapupiApiKey.trim().length < 8 || saveZapupiKeyMutation.isPending}
+                >
+                  {saveZapupiKeyMutation.isPending
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Save className="h-4 w-4" />}
+                  {saveZapupiKeyMutation.isPending ? "Updating..." : "Update Key"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Active source: {zapupiSettings?.source === "custom"
+                  ? "admin override"
+                  : zapupiSettings?.source === "environment"
+                    ? "Replit secret"
+                    : "none"}
+                {zapupiSettings?.updated_at
+                  ? ` · last changed ${formatDistanceToNow(new Date(zapupiSettings.updated_at), { addSuffix: true })}`
+                  : ""}
+              </p>
+            </CardContent>
+          </form>
+        </Card>
 
         {/* Info Card */}
         <Card className="border-primary/20 bg-primary/5">

@@ -6,6 +6,7 @@
 import express from 'express';
 import { query, withTx } from '../db.js';
 import { ah, requireAuth } from '../middleware/auth.js';
+import { decryptAppSecret } from '../services/appSecret.js';
 
 const router = express.Router();
 
@@ -15,8 +16,19 @@ const USD_RATE    = 83.5;
 const MIN_INR     = 50;
 const MAX_INR     = 100000;
 
-function getZapKey() {
-  return process.env.ZAPUPI_API_KEY || '';
+async function getZapKey() {
+  try {
+    const { rows } = await query(
+      `SELECT zapupi_api_key_ciphertext
+         FROM public.platform_settings
+        WHERE id = 'global'`
+    );
+    const encrypted = rows[0]?.zapupi_api_key_ciphertext;
+    if (encrypted) return decryptAppSecret(encrypted).trim();
+  } catch (error) {
+    console.error('[zapupi] Stored API key could not be loaded:', error.message);
+  }
+  return String(process.env.ZAPUPI_API_KEY || '').trim();
 }
 
 /** POST form-encoded, then retry as JSON if needed */
@@ -86,7 +98,7 @@ async function creditWallet({ userId, orderId, amountInr, txnId, utr }) {
 
 // ─── POST /api/zapupi/create-order ───────────────────────────────────────────
 router.post('/create-order', requireAuth, ah(async (req, res) => {
-  const ZAP_KEY = getZapKey();
+  const ZAP_KEY = await getZapKey();
   if (!ZAP_KEY) return res.status(500).json({ error: 'ZapUPI not configured' });
 
   const amountInr = Math.floor(Number(req.body?.amount_inr) || 0);
@@ -138,7 +150,7 @@ router.post('/create-order', requireAuth, ah(async (req, res) => {
 
 // ─── POST /api/zapupi/sync-deposit ───────────────────────────────────────────
 router.post('/sync-deposit', requireAuth, ah(async (req, res) => {
-  const ZAP_KEY = getZapKey();
+  const ZAP_KEY = await getZapKey();
   if (!ZAP_KEY) return res.status(500).json({ error: 'ZapUPI not configured' });
 
   const orderId = String(req.body?.order_id || '').trim();
@@ -183,7 +195,7 @@ router.post('/webhook', ah(async (req, res) => {
   res.json({ received: true }); // acknowledge immediately
 
   try {
-    const ZAP_KEY = getZapKey();
+    const ZAP_KEY = await getZapKey();
     if (!ZAP_KEY) return;
 
     const payload = req.body || {};

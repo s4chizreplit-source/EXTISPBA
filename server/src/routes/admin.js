@@ -7,6 +7,7 @@ import {
 } from '../middleware/engagementOrderReadiness.js';
 import { fetchProviderBalance, providerConfigured } from '../provider.js';
 import { seedAllData } from '../seeds/seedAllData.js';
+import { encryptAppSecret } from '../services/appSecret.js';
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -99,7 +100,13 @@ router.get(
 
 // Platform settings
 router.get('/platform-settings', ah(async (_req, res) => {
-  const { rows } = await query(`SELECT * FROM platform_settings WHERE id='global'`);
+  const { rows } = await query(
+    `SELECT id, global_markup_percent, maintenance_mode,
+            funds_added_baseline_inr, funds_added_baseline_count,
+            funds_added_baseline_at, updated_at
+       FROM platform_settings
+      WHERE id = 'global'`
+  );
   res.json(rows[0] || { id: 'global', global_markup_percent: 0, maintenance_mode: false });
 }));
 
@@ -110,11 +117,55 @@ router.patch('/platform-settings', ah(async (req, res) => {
         SET global_markup_percent = COALESCE($1, global_markup_percent),
             maintenance_mode      = COALESCE($2, maintenance_mode),
             updated_at            = now()
-      WHERE id = 'global' RETURNING *`,
+      WHERE id = 'global'
+      RETURNING id, global_markup_percent, maintenance_mode,
+                funds_added_baseline_inr, funds_added_baseline_count,
+                funds_added_baseline_at, updated_at`,
     [global_markup_percent ?? null, maintenance_mode ?? null]
   );
   res.json(rows[0]);
 }));
+
+router.get('/zapupi-settings', ah(async (_req, res) => {
+  const { rows } = await query(
+    `SELECT NULLIF(TRIM(zapupi_api_key_ciphertext), '') IS NOT NULL AS has_custom_key,
+            zapupi_api_key_updated_at
+       FROM public.platform_settings
+      WHERE id = 'global'`
+  );
+  const hasCustomKey = rows[0]?.has_custom_key === true;
+  const hasEnvironmentKey = Boolean(String(process.env.ZAPUPI_API_KEY || '').trim());
+  res.json({
+    configured: hasCustomKey || hasEnvironmentKey,
+    source: hasCustomKey ? 'custom' : hasEnvironmentKey ? 'environment' : 'none',
+    updated_at: rows[0]?.zapupi_api_key_updated_at || null,
+  });
+}));
+
+router.patch(
+  '/zapupi-settings',
+  validate(z.object({
+    api_key: z.string().trim().min(8).max(1024),
+  })),
+  ah(async (req, res) => {
+    const apiKeyCiphertext = encryptAppSecret(req.valid.api_key);
+    const { rows } = await query(
+      `UPDATE public.platform_settings
+          SET zapupi_api_key_ciphertext = $1,
+              zapupi_api_key_updated_at = now(),
+              updated_at = now()
+        WHERE id = 'global'
+        RETURNING zapupi_api_key_updated_at`,
+      [apiKeyCiphertext]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Platform settings not found' });
+    res.json({
+      configured: true,
+      source: 'custom',
+      updated_at: rows[0].zapupi_api_key_updated_at,
+    });
+  })
+);
 
 // Providers list (for dropdown)
 router.get('/providers', ah(async (_req, res) => {
