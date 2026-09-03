@@ -1,96 +1,79 @@
-# NEW PANNEL
+# Organic SMM Pro — Final Year Project
 
-Mera GitHub repo connect ho chuka hai. Ye ek full SMM platform hai — "Organic SMM Pro". Isme sab kuch already coded hai. Mujhe bas ensure karna hai ki:
+> **Built as a Final Year Engineering Project** for academic learning and demonstration purposes.
 
-Lovable Cloud (Supabase) Setup — Database tables, RLS policies, Edge Functions sab deploy ho jayein exactly jaisa code me hai.
+## Project Overview
 
-Database Migration — Ye tables create karo agar nahi hain:
+Organic SMM Pro is a full-stack Social Media Marketing (SMM) panel built as a final year project to demonstrate real-world web application development. The project covers end-to-end product engineering including authentication, payments, background job scheduling, admin dashboards, and third-party API integrations.
 
-profiles, wallets, transactions, user_roles (enum: admin/moderator/user)
+## What I Learned / Topics Covered
 
-services, providers, provider_accounts, service_provider_mapping
+- **Full-Stack Development** — React (TypeScript) frontend + Node.js/Express backend
+- **Database Design** — PostgreSQL with complex relational schema (users, wallets, orders, transactions)
+- **Authentication & Authorization** — Session-based auth with role management (admin / user)
+- **Payment Gateway Integration** — ZapUPI (UPI) and OxaPay (crypto) payment flows
+- **Background Job Scheduling** — Cron-based organic delivery dispatcher with race-condition handling
+- **REST API Design** — Admin and public APIs with middleware, rate limiting, and error handling
+- **Third-Party API Integration** — SMM provider APIs with round-robin rotation and retry logic
+- **Database Backup & Mirroring** — Automated 6-hour backups with Supabase mirror
+- **Responsive UI** — Mobile-first design with Tailwind CSS + shadcn/ui
+- **Security** — AES-256-GCM encryption for stored secrets, bcrypt passwords, CSRF protection
 
-engagement_bundles, bundle_items
+## Tech Stack
 
-engagement_orders, engagement_order_items, organic_run_schedule
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui |
+| Backend | Node.js, Express.js |
+| Database | PostgreSQL (Replit managed) |
+| Auth | Express sessions + bcrypt |
+| Payments | ZapUPI (UPI), OxaPay (USDT) |
+| Hosting | Replit |
+| Version Control | Git / GitHub |
 
-orders, subscriptions, subscription_requests
+## Key Features
 
-support_tickets, chat_conversations, chat_messages
+- **Engagement Order System** — Users place orders for social media engagement (views, likes, saves, shares)
+- **Organic Delivery Algorithm** — Randomized, time-distributed delivery that mimics natural growth patterns
+- **Multi-Provider Rotation** — LRU-based round-robin across multiple SMM provider API accounts
+- **Wallet System** — INR/USD wallet with deposit, transaction history, and admin controls
+- **Admin Dashboard** — Real-time stats, order management, provider health monitoring, user management
+- **Live Chat Support** — In-app support ticket and chat system
+- **Automated Backups** — 6-hourly database backups with 28-day retention
 
-platform_settings (maintenance_mode, global_markup_percent)
+## Project Structure
 
-deposits table if needed
+```
+├── src/                    # React frontend (TypeScript)
+│   ├── pages/              # Route-level page components
+│   ├── components/         # Reusable UI components
+│   └── lib/                # Utilities, algorithms, types
+├── server/
+│   ├── src/                # Express backend
+│   │   ├── routes/         # API route handlers
+│   │   ├── middleware/      # Auth, validation middleware
+│   │   ├── services/       # Business logic services
+│   │   └── cron.js         # Background job scheduler
+│   ├── migrations/         # SQL migration files
+│   └── test/               # Integration tests
+└── docs/                   # Project documentation
+```
 
-RLS Policies — Users apna data dekh sakein, admins sab dekh sakein. has_role() security definer function use karo.
+## Running Locally
 
-Edge Functions Deploy — Ye sab deploy karo:
-
-process-order, process-engagement-order, execute-organic-runs, execute-all-runs
-
-check-order-status, cancel-order, import-services
-
-verify-usdt-deposit, get-exchange-rates
-
-check-subscription-expiry, send-telegram-notification
-
-auto-verify-signup, public-api
-
-Storage Bucket — deposit-screenshots bucket create karo (public).
-
-Auth Setup — Email/password auth enable karo. Auto-confirm OFF rakho.
-
-Database Functions — has_role(), get_user_role(), get_admin_dashboard_stats(), get_admin_users_summary() create karo.
-
-Triggers — Profile auto-create on signup, wallet auto-create on signup.
-
-Realtime — Enable realtime for: organic_run_schedule, engagement_order_items, orders, chat_messages
-
-Platform Settings — Insert default row: maintenance_mode=false, global_markup_percent=0
-
-Sab kuch code me already hai — bas database aur cloud infrastructure setup karna hai. Code me koi change MAT karo. Sirf backend setup karo.
-
-Step 2: Agar koi error aaye to ye paste karo:
-
-Build errors fix karo. Code me jo bhi import errors, type errors ya missing dependencies hain wo resolve karo. Features ya UI change MAT karo — sirf errors fix karo.
-
-Step 3: Admin user setup:
-
-Mera account admin banao. user_roles table me meri user_id ke saath role='admin' insert karo. Pehle meri user_id profiles table se nikal lo.
-
-Important Notes:
-
-GitHub repo: https://github.com/xbhishekh/organicsmm
-
-Brand: Organic SMM Pro
-
-Color: Orange + White theme
-
-Logo already codebase me hai: src/assets/logo.jpg
-
-Favicon: public/favicon.ico (already set)
-
-All features: Engagement orders, Organic delivery, Multi-provider rotation, Wallet, Subscriptions, Live Chat, Admin Panel
-
-This project was built with [Lovable](https://lovable.dev).
-
-**Live app**: https://whopxbot.lovable.app
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/09c93b64-47c3-4f88-9897-bf2db15f9438).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Requires Node.js 18+ and PostgreSQL.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+git clone https://github.com/s4chizreplit-source/EXTISPBA.git
+cd EXTISPBA
+npm install
 npm run dev
 ```
+
+## Academic Note
+
+This project was developed as a final year B.Tech/BCA project to demonstrate practical implementation of modern full-stack web development concepts. It integrates real payment APIs, background workers, and a production-grade database schema — topics typically covered across multiple courses (DBMS, Web Technologies, Software Engineering).
+
+---
+
+*Project by — Final Year Student | Computer Science / IT*
