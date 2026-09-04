@@ -4,7 +4,7 @@ import { Progress } from "@/components/ui/progress";
 import { format, formatDistanceToNow } from "date-fns";
 import {
   Eye, Heart, MessageCircle, Bookmark, Share2,
-  Clock, Play, CheckCircle2, XCircle, Pencil, Timer, RefreshCw, Loader2, TrendingUp, CalendarClock
+  Clock, Play, CheckCircle2, XCircle, Timer, RefreshCw, Loader2, TrendingUp, CalendarClock
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -51,13 +51,12 @@ interface TypeTarget {
 
 interface MergedTimelineProps {
   runs: MergedRun[];
-  onEditRun: (run: MergedRun) => void;
   nextRun?: MergedRun | null;
   onRefresh?: () => void;
-  typeTargets?: TypeTarget[]; // Total targets for each engagement type in order
+  typeTargets?: TypeTarget[];
 }
 
-export function MergedTimeline({ runs, onEditRun, nextRun, onRefresh, typeTargets = [] }: MergedTimelineProps) {
+export function MergedTimeline({ runs, nextRun, onRefresh, typeTargets = [] }: MergedTimelineProps) {
   const [refreshingRunId, setRefreshingRunId] = useState<string | null>(null);
   const [isGlobalRefreshing, setIsGlobalRefreshing] = useState(false);
 
@@ -285,7 +284,7 @@ export function MergedTimeline({ runs, onEditRun, nextRun, onRefresh, typeTarget
                       ? 'bg-green-500/10 border border-green-500/30'
                       : 'bg-primary/5 border border-primary/20 hover:bg-primary/10 cursor-pointer'
                   }`}
-                onClick={() => isPending && onEditRun(run)}
+                onClick={() => {}}
               >
                 {/* Main Row */}
                 <div className="p-3 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -524,20 +523,6 @@ export function MergedTimeline({ runs, onEditRun, nextRun, onRefresh, typeTarget
                       </Button>
                     )}
 
-                    {isPending && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 px-3 text-muted-foreground hover:text-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditRun(run);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4 mr-1.5" />
-                        Edit
-                      </Button>
-                    )}
                   </div>
                 </div>
 

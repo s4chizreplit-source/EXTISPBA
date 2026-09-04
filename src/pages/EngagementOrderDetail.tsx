@@ -46,7 +46,6 @@ import { LiveStatsBoard } from "@/components/engagement/LiveStatsBoard";
 import { MergedTimeline } from "@/components/engagement/MergedTimeline";
 import { TypeHistoryCard } from "@/components/engagement/TypeHistoryCard";
 import { PerTypeBreakdown } from "@/components/engagement/PerTypeBreakdown";
-import { EditRunDialog } from "@/components/engagement/EditRunDialog";
 import { HealthScoreBadge } from "@/components/engagement/HealthScoreBadge";
 import { BottingScoreCard } from "@/components/engagement/BottingScoreCard";
 import type { Counts } from "@/lib/engagement-ratio";
@@ -73,13 +72,6 @@ const STATUS_CONFIG = {
   paused: { color: "bg-amber-500/20 text-amber-400 border-amber-500/30", icon: Pause, label: "Paused" },
 };
 
-interface EditRunData {
-  id: string;
-  quantity: number;
-  scheduledAt: string;
-  engagementType?: string;
-  runNumber?: number;
-}
 
 export default function EngagementOrderDetail() {
   const { orderNumber } = useParams();
@@ -91,9 +83,6 @@ export default function EngagementOrderDetail() {
 
   // View mode state removed - showing both views now
   
-  // Edit modal state
-  const [editingRun, setEditingRun] = useState<EditRunData | null>(null);
-
   // Dynamic refetch interval - balanced for performance
   const [refetchInterval, setRefetchInterval] = useState<number | false>(5000);
 
@@ -295,65 +284,10 @@ export default function EngagementOrderDetail() {
     },
   });
 
-  // Update run mutation with optimistic updates AND wallet charge
-  const updateRunMutation = useMutation({
-    mutationFn: async ({ runId, quantity, scheduledAt }: { runId: string; quantity: number; scheduledAt: string }) => {
-      const currentRun = stats?.allRuns.find((r: any) => r.id === runId);
-      if (!currentRun) throw new Error('Run not found');
-
-      const res = await fetch(`/api/engagement-orders/runs/${runId}/reschedule`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity, scheduledAt }),
-      });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Update failed'); }
-      const result = await res.json();
-      return { currentRun, result };
-    },
-    // OPTIMISTIC UPDATE - Update UI immediately before server confirms
-    onMutate: async ({ runId, quantity, scheduledAt }) => {
-      // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['engagement-order-detail', orderNumber] });
-      
-      // Snapshot previous value
-      const previousOrder = queryClient.getQueryData(['engagement-order-detail', orderNumber]);
-      
-      // Optimistically update the cache
-      queryClient.setQueryData(['engagement-order-detail', orderNumber], (old: any) => {
-        if (!old?.items) return old;
-        
-        return {
-          ...old,
-          items: old.items.map((item: any) => ({
-            ...item,
-            runs: item.runs?.map((run: any) => 
-              run.id === runId 
-                ? { ...run, quantity_to_send: quantity, scheduled_at: scheduledAt, variance_applied: 0 }
-                : run
-            )
-          }))
-        };
-      });
-      
-      return { previousOrder };
-    },
-    onSuccess: async (data) => {
-      const extraCharged = Number(data?.result?.extra_charged || 0);
-
-      toast({
-        title: "✅ Run Updated",
-        description: extraCharged > 0
-          ? `Schedule updated. ${formatPrice(extraCharged)} charged from wallet.`
-          : "Schedule updated successfully.",
-      });
-      setEditingRun(null);
-      refreshWallet?.();
-      
-      // Refetch to ensure data consistency
-      await refetch();
-    },
-    onError: (error: Error, _, context) => {
-      // Rollback on error
+  // placeholder — kept so downstream error handler shape is unchanged
+  const _unusedRunMutationPlaceholder = useMutation({
+    mutationFn: async (_: unknown) => ({}),
+    onError: (error: Error, _, context: any) => {
       if (context?.previousOrder) {
         queryClient.setQueryData(['engagement-order-detail', orderNumber], context.previousOrder);
       }
@@ -462,28 +396,6 @@ export default function EngagementOrderDetail() {
       nextRun,
     };
   }, [order]);
-
-  const handleEditRun = (run: any) => {
-    if (run.status !== 'pending') {
-      toast({
-        title: "Cannot Edit",
-        description: "Only pending runs can be edited",
-        variant: "destructive",
-      });
-      return;
-    }
-    setEditingRun({
-      id: run.id,
-      quantity: run.quantity_to_send,
-      scheduledAt: run.scheduled_at,
-      engagementType: run.engagement_type,
-      runNumber: run.run_number,
-    });
-  };
-
-  const handleSaveEdit = (data: { runId: string; quantity: number; scheduledAt: string }) => {
-    updateRunMutation.mutate(data);
-  };
 
   // INSTANT RENDER - Show layout immediately, content loads in background
   // Never show blank/black screen - always render DashboardLayout first
@@ -723,7 +635,6 @@ export default function EngagementOrderDetail() {
           </h2>
         <MergedTimeline
             runs={stats.allRuns}
-            onEditRun={handleEditRun}
             nextRun={stats.nextRun}
             onRefresh={() => refetch()}
             typeTargets={stats.perType}
@@ -734,9 +645,6 @@ export default function EngagementOrderDetail() {
         <div className="space-y-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <BarChart3 className="h-5 w-5 text-primary" /> Per-Service History
-            <span className="text-sm font-normal text-muted-foreground">
-              (Edit from here or merged timeline - both sync automatically)
-            </span>
           </h2>
           
           {/* Sort items by engagement type priority: Views → Likes → Comments → Reposts → Shares → Saves */}
@@ -791,7 +699,6 @@ export default function EngagementOrderDetail() {
                   deliveredQuantity={itemDelivered}
                   runs={itemRuns}
                   serviceName={item.service?.name}
-                  onEditRun={(run) => handleEditRun({ ...run, engagement_type: item.engagement_type })}
                   itemId={item.id}
                   itemStatus={item.status}
                   onPause={(id) => pauseItemMutation.mutate(id)}
@@ -886,20 +793,6 @@ export default function EngagementOrderDetail() {
         </Card>
       </div>
 
-      {/* Edit Run Dialog */}
-      <EditRunDialog
-        open={!!editingRun}
-        onOpenChange={(open) => !open && setEditingRun(null)}
-        run={editingRun}
-        onSave={handleSaveEdit}
-        isSaving={updateRunMutation.isPending}
-        walletBalance={wallet?.balance || 0}
-        pricePerThousand={
-          order?.items?.find((i: any) => 
-            i.runs?.some((r: any) => r.id === editingRun?.id)
-          )?.service?.price || 0.1
-        }
-      />
     </DashboardLayout>
   );
 }

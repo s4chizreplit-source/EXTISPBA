@@ -23,11 +23,9 @@ import {
   Calendar,
   Activity,
   Play,
-  History,
-  Pencil
+  History
 } from 'lucide-react';
 import type { Order, OrganicRun } from '@/lib/supabase';
-import { EditRunDialog } from '@/components/engagement/EditRunDialog';
 import { SingleOrderProgressChart } from '@/components/engagement/SingleOrderProgressChart';
 
 const statusFilters = ['All', 'pending', 'processing', 'completed', 'partial', 'failed', 'cancelled'];
@@ -54,15 +52,6 @@ const getServiceTypeLabel = (category: string | undefined): string => {
   return words[words.length - 1]?.toLowerCase() || 'items';
 };
 
-// Edit run data type
-interface EditRunData {
-  id: string;
-  quantity: number;
-  scheduledAt: string;
-  engagementType?: string;
-  runNumber?: number;
-}
-
 export default function Orders() {
   const { user, wallet, refreshWallet } = useAuth();
   const { formatPrice } = useCurrency();
@@ -70,7 +59,6 @@ export default function Orders() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [editingRun, setEditingRun] = useState<EditRunData | null>(null);
 
   // Instant load with cache - no loading spinner
   const { data: orders, refetch } = useQuery({
@@ -110,34 +98,6 @@ export default function Orders() {
         return 10000;
       }
       return false;
-    }
-  });
-
-  // Edit run mutation with wallet deduction for increased quantity
-  const editRunMutation = useMutation({
-    mutationFn: async ({ runId, quantity, scheduledAt }: { runId: string; quantity: number; scheduledAt: string }) => {
-      const res = await fetch(`/api/engagement-orders/runs/${runId}/reschedule`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity, scheduledAt }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to reschedule');
-      return data as { success: boolean; extra_charged: number; new_balance: number };
-    },
-    onSuccess: (data: any) => {
-      const extra = Number(data?.extra_charged || 0);
-      toast.success(
-        extra > 0
-          ? `✅ Rescheduled! ${formatPrice(extra)} charged from wallet.`
-          : '✅ Run rescheduled successfully!'
-      );
-      refetchRuns();
-      refreshWallet?.();
-      setEditingRun(null);
-    },
-    onError: (error: any) => {
-      toast.error(`Failed to update: ${error.message}`);
     }
   });
 
@@ -608,31 +568,12 @@ export default function Orders() {
                                         </div>
                                       </div>
 
-                                      {/* Provider Order ID or Edit Button */}
-                                      {run.provider_order_id ? (
+                                      {/* Provider Order ID */}
+                                      {run.provider_order_id && (
                                         <div className="text-right shrink-0">
                                           <p className="text-[10px] text-muted-foreground uppercase">Provider ID</p>
                                           <p className="text-xs font-mono text-primary">{run.provider_order_id}</p>
                                         </div>
-                                      ) : isPending && (
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-8 px-3 text-primary hover:bg-primary/20"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setEditingRun({
-                                              id: run.id,
-                                              quantity: run.quantity_to_send,
-                                              scheduledAt: run.scheduled_at,
-                                              engagementType: order.service?.name || 'Views',
-                                              runNumber: run.run_number,
-                                            });
-                                          }}
-                                        >
-                                          <Pencil className="h-4 w-4 mr-1.5" />
-                                          Edit / Reschedule
-                                        </Button>
                                       )}
                                     </div>
 
@@ -699,18 +640,6 @@ export default function Orders() {
           </div>
         )}
 
-        {/* Edit Run Dialog */}
-        <EditRunDialog
-          open={!!editingRun}
-          onOpenChange={(open) => !open && setEditingRun(null)}
-          run={editingRun}
-          onSave={({ runId, quantity, scheduledAt }) => {
-            editRunMutation.mutate({ runId, quantity, scheduledAt });
-          }}
-          isSaving={editRunMutation.isPending}
-          walletBalance={wallet?.balance || 0}
-          pricePerThousand={getOrderPricePerThousand()}
-        />
       </div>
     </DashboardLayout>
   );

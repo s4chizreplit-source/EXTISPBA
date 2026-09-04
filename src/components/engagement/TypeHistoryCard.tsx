@@ -7,7 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { format, formatDistanceToNow } from "date-fns";
 import {
   Eye, Heart, MessageCircle, Bookmark, Share2,
-  Clock, Play, CheckCircle2, XCircle, Pencil,
+  Clock, Play, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Zap, CalendarClock,
   Pause, PlayCircle, Ban
 } from "lucide-react";
@@ -57,7 +57,6 @@ interface TypeHistoryCardProps {
   runs: Run[];
   serviceName?: string;
   servicePrice?: number;
-  onEditRun: (run: Run) => void;
   itemId?: string;
   itemStatus?: string;
   onPause?: (itemId: string) => void;
@@ -72,7 +71,6 @@ export function TypeHistoryCard({
   runs,
   serviceName,
   servicePrice,
-  onEditRun,
   itemId,
   itemStatus,
   onPause,
@@ -379,7 +377,7 @@ export function TypeHistoryCard({
                         isPending ? 'hover:bg-primary/5 cursor-pointer' :
                           isCompleted ? 'bg-emerald-500/5' : ''
                       }`}
-                    onClick={() => isPending && onEditRun(run)}
+                    onClick={() => {}}
                   >
                     <div className="flex items-center gap-4">
                       {/* Run Number Circle - Colorful Gradient */}
@@ -471,20 +469,6 @@ export function TypeHistoryCard({
                           </div>
                         )}
 
-                        {isPending && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onEditRun(run);
-                            }}
-                          >
-                            <Pencil className="h-3 w-3 mr-1" />
-                            Edit
-                          </Button>
-                        )}
                       </div>
                     </div>
 
