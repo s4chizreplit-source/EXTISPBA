@@ -258,15 +258,19 @@ router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
   if (!runRows[0]) return res.status(404).json({ error: 'Run not found' });
 
   const run = runRows[0];
-  const oldQty = run.quantity_to_send;
-  const diff = quantity - oldQty;
+  const oldQty = Number(run.quantity_to_send);
+  const newQty = Number(quantity);
+  const diff = newQty - oldQty;
   let extraCharged = 0;
+
+  console.log(`[reschedule] run=${runId} oldQty=${oldQty} newQty=${newQty} diff=${diff} item_price=${run.item_total_price} item_qty=${run.item_quantity}`);
 
   if (diff > 0 && run.item_total_price && run.item_quantity) {
     // price per unit = total item price ÷ total item quantity
     // extra cost = diff × price_per_unit
     const pricePerUnit = Number(run.item_total_price) / Number(run.item_quantity);
     const extraCost = diff * pricePerUnit;
+    console.log(`[reschedule] charging: pricePerUnit=${pricePerUnit} extraCost=${extraCost}`);
     const { rows: w } = await query(`SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE`, [userId]);
     if (!w[0] || Number(w[0].balance) < extraCost) return res.status(400).json({ error: 'Insufficient balance' });
     await query(`UPDATE wallets SET balance=balance-$1, updated_at=now() WHERE user_id=$2`, [extraCost, userId]);
