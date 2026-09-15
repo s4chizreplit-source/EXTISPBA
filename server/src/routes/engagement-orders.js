@@ -283,11 +283,11 @@ router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
     pricePerUnit = svcPricePerK / 1000;
   }
 
-  console.log(`[reschedule] run=${runId} oldQty=${oldQty} newQty=${newQty} diff=${diff} pricePerUnit=${pricePerUnit} (itemPrice=${itemPrice} itemQty=${itemQty} svcPricePerK=${svcPricePerK})`);
+  process.stderr.write(`[reschedule] run=${runId} oldQty=${oldQty} newQty=${newQty} diff=${diff} pricePerUnit=${pricePerUnit} itemPrice=${itemPrice} itemQty=${itemQty} svcPricePerK=${svcPricePerK}\n`);
 
   if (diff > 0 && pricePerUnit > 0) {
     const extraCost = diff * pricePerUnit;
-    console.log(`[reschedule] charging extraCost=${extraCost}`);
+    process.stderr.write(`[reschedule] CHARGING extraCost=${extraCost}\n`);
     const { rows: w } = await query(`SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE`, [userId]);
     if (!w[0] || Number(w[0].balance) < extraCost) return res.status(400).json({ error: 'Insufficient balance' });
     await query(`UPDATE wallets SET balance=balance-$1, updated_at=now() WHERE user_id=$2`, [extraCost, userId]);
