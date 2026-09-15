@@ -248,7 +248,7 @@ router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
 
   // Verify ownership
   const { rows: runRows } = await query(
-    `SELECT ors.*, eoi.price AS price_per_unit, eo.user_id
+    `SELECT ors.*, eoi.price AS item_total_price, eoi.quantity AS item_quantity, eo.user_id
        FROM organic_run_schedule ors
        JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
        JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
@@ -262,9 +262,11 @@ router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
   const diff = quantity - oldQty;
   let extraCharged = 0;
 
-  if (diff > 0 && run.price_per_unit) {
-    // Charge extra from wallet
-    const extraCost = (diff / 1000) * Number(run.price_per_unit);
+  if (diff > 0 && run.item_total_price && run.item_quantity) {
+    // price per unit = total item price ÷ total item quantity
+    // extra cost = diff × price_per_unit
+    const pricePerUnit = Number(run.item_total_price) / Number(run.item_quantity);
+    const extraCost = diff * pricePerUnit;
     const { rows: w } = await query(`SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE`, [userId]);
     if (!w[0] || Number(w[0].balance) < extraCost) return res.status(400).json({ error: 'Insufficient balance' });
     await query(`UPDATE wallets SET balance=balance-$1, updated_at=now() WHERE user_id=$2`, [extraCost, userId]);

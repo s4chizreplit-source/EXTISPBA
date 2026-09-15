@@ -7,7 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { format, formatDistanceToNow } from "date-fns";
 import {
   Eye, Heart, MessageCircle, Bookmark, Share2,
-  Clock, Play, CheckCircle2, XCircle,
+  Clock, Play, CheckCircle2, XCircle, Pencil,
   ChevronDown, ChevronUp, ExternalLink, RefreshCw, Zap, CalendarClock,
   Pause, PlayCircle, Ban
 } from "lucide-react";
@@ -57,6 +57,7 @@ interface TypeHistoryCardProps {
   runs: Run[];
   serviceName?: string;
   servicePrice?: number;
+  onEditRun?: (run: Run) => void;
   itemId?: string;
   itemStatus?: string;
   onPause?: (itemId: string) => void;
@@ -71,6 +72,7 @@ export function TypeHistoryCard({
   runs,
   serviceName,
   servicePrice,
+  onEditRun,
   itemId,
   itemStatus,
   onPause,
@@ -454,21 +456,29 @@ export function TypeHistoryCard({
 
                       {/* Right Side - Provider Name + ID & Edit */}
                       <div className="flex items-center gap-4">
-                        {/* Provider Account Name (hidden when target-met auto completed) */}
                         {!autoCompleted && run.provider_account_name && (
                           <div className="text-right">
                             <p className="text-xs text-muted-foreground uppercase">Provider</p>
                             <p className="text-sm font-bold text-primary">{run.provider_account_name}</p>
                           </div>
                         )}
-
                         {!autoCompleted && run.provider_order_id && (
                           <div className="text-right">
                             <p className="text-xs text-muted-foreground uppercase">Order ID</p>
                             <p className="text-sm font-mono text-teal-400">{run.provider_order_id}</p>
                           </div>
                         )}
-
+                        {isPending && onEditRun && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={(e) => { e.stopPropagation(); onEditRun(run); }}
+                          >
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Edit
+                          </Button>
+                        )}
                       </div>
                     </div>
 
