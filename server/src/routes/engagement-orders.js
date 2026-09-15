@@ -246,12 +246,18 @@ router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
   const { quantity, scheduledAt } = req.body;
   const userId = req.session.userId;
 
-  // Verify ownership
+  // Verify ownership + get pricing info
+  // price_per_unit: eoi.price/eoi.quantity when available, else service price per unit
   const { rows: runRows } = await query(
-    `SELECT ors.*, eoi.price AS item_total_price, eoi.quantity AS item_quantity, eo.user_id
+    `SELECT ors.*,
+            eoi.price       AS item_total_price,
+            eoi.quantity    AS item_quantity,
+            s.price         AS service_price_per_k,
+            eo.user_id
        FROM organic_run_schedule ors
        JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
-       JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
+       JOIN engagement_orders      eo  ON eo.id  = eoi.engagement_order_id
+  LEFT JOIN services               s   ON s.id   = eoi.service_id
       WHERE ors.id = $1 AND eo.user_id = $2`,
     [runId, userId]
   );
@@ -263,14 +269,25 @@ router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
   const diff = newQty - oldQty;
   let extraCharged = 0;
 
-  console.log(`[reschedule] run=${runId} oldQty=${oldQty} newQty=${newQty} diff=${diff} item_price=${run.item_total_price} item_qty=${run.item_quantity}`);
+  // Resolve price per unit:
+  //   Preferred: eoi.price (total for item) ÷ eoi.quantity (total ordered)
+  //   Fallback:  service.price is already per-1000, so ÷ 1000
+  const itemPrice = Number(run.item_total_price || 0);
+  const itemQty   = Number(run.item_quantity   || 0);
+  const svcPricePerK = Number(run.service_price_per_k || 0);
 
-  if (diff > 0 && run.item_total_price && run.item_quantity) {
-    // price per unit = total item price ÷ total item quantity
-    // extra cost = diff × price_per_unit
-    const pricePerUnit = Number(run.item_total_price) / Number(run.item_quantity);
+  let pricePerUnit = 0;
+  if (itemPrice > 0 && itemQty > 0) {
+    pricePerUnit = itemPrice / itemQty;
+  } else if (svcPricePerK > 0) {
+    pricePerUnit = svcPricePerK / 1000;
+  }
+
+  console.log(`[reschedule] run=${runId} oldQty=${oldQty} newQty=${newQty} diff=${diff} pricePerUnit=${pricePerUnit} (itemPrice=${itemPrice} itemQty=${itemQty} svcPricePerK=${svcPricePerK})`);
+
+  if (diff > 0 && pricePerUnit > 0) {
     const extraCost = diff * pricePerUnit;
-    console.log(`[reschedule] charging: pricePerUnit=${pricePerUnit} extraCost=${extraCost}`);
+    console.log(`[reschedule] charging extraCost=${extraCost}`);
     const { rows: w } = await query(`SELECT balance FROM wallets WHERE user_id=$1 FOR UPDATE`, [userId]);
     if (!w[0] || Number(w[0].balance) < extraCost) return res.status(400).json({ error: 'Insufficient balance' });
     await query(`UPDATE wallets SET balance=balance-$1, updated_at=now() WHERE user_id=$2`, [extraCost, userId]);
