@@ -852,11 +852,17 @@ export default function EngagementOrderDetail() {
         onSave={handleSaveEdit}
         isSaving={updateRunMutation.isPending}
         walletBalance={wallet?.balance || 0}
-        pricePerThousand={
-          order?.items?.find((i: any) =>
+        pricePerThousand={(() => {
+          const item = order?.items?.find((i: any) =>
             i.runs?.some((r: any) => r.id === editingRun?.id)
-          )?.service?.price || 0.1
-        }
+          );
+          // Use actual bundle rate (what user paid) = eoi.price / eoi.quantity * 1000
+          // Fallback to service.price only if item pricing data is missing
+          if (item?.price && item?.quantity && Number(item.quantity) > 0) {
+            return (Number(item.price) / Number(item.quantity)) * 1000;
+          }
+          return item?.service?.price || 0.1;
+        })()}
       />
     </DashboardLayout>
   );
