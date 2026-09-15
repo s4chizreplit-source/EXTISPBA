@@ -597,15 +597,15 @@ router.post('/runs/:runId/reschedule', requireAuth, ah(async (req, res) => {
   const userId = req.session.userId;
   const { rows } = await query(
     `SELECT ors.id, ors.status, ors.quantity_to_send,
-            eoi.price    AS item_total_price,
-            eoi.quantity AS item_quantity,
-            eoi.service_id,
-            s.price      AS service_price_per_k,
+            eoi.engagement_type,
+            bi.price_per_k AS bundle_price_per_k,
+            eo.bundle_id,
             eo.user_id
      FROM organic_run_schedule ors
      JOIN engagement_order_items eoi ON eoi.id = ors.engagement_order_item_id
      JOIN engagement_orders eo ON eo.id = eoi.engagement_order_id
-LEFT JOIN services s ON s.id = eoi.service_id
+LEFT JOIN bundle_items bi ON bi.bundle_id = eo.bundle_id
+                          AND bi.engagement_type = eoi.engagement_type
      WHERE ors.id = $1`,
     [req.params.runId]
   );
@@ -621,21 +621,11 @@ LEFT JOIN services s ON s.id = eoi.service_id
   const diff   = newQty - oldQty;
   let extraCharged = 0;
 
-  // Resolve per-unit price:
-  //   Preferred: eoi.price (total for item) / eoi.quantity (total ordered)
-  //   Fallback:  service.price is per-1000, so / 1000
-  const itemPrice    = Number(run.item_total_price  || 0);
-  const itemQty      = Number(run.item_quantity      || 0);
-  const svcPricePerK = Number(run.service_price_per_k || 0);
+  // Use current bundle price_per_k (what user is charged today)
+  const bundlePricePerK = Number(run.bundle_price_per_k || 0);
+  const pricePerUnit = bundlePricePerK / 1000;
 
-  let pricePerUnit = 0;
-  if (itemPrice > 0 && itemQty > 0) {
-    pricePerUnit = itemPrice / itemQty;
-  } else if (svcPricePerK > 0) {
-    pricePerUnit = svcPricePerK / 1000;
-  }
-
-  process.stderr.write(`[reschedule] runId=${req.params.runId} oldQty=${oldQty} newQty=${newQty} diff=${diff} pricePerUnit=${pricePerUnit}\n`);
+  process.stderr.write(`[reschedule] runId=${req.params.runId} oldQty=${oldQty} newQty=${newQty} diff=${diff} bundlePricePerK=${bundlePricePerK}\n`);
 
   if (diff > 0 && pricePerUnit > 0) {
     const extraCost = diff * pricePerUnit;

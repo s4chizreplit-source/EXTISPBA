@@ -83,12 +83,24 @@ router.get('/', requireAuth, ah(async (req, res) => {
 
 // Helper: build full order detail object from DB rows
 async function buildOrderDetail(orderId) {
+  // Fetch the bundle_id for this order so we can get current pricing
+  const { rows: orderMeta } = await query(
+    `SELECT bundle_id FROM engagement_orders WHERE id = $1`, [orderId]
+  );
+  const bundleId = orderMeta[0]?.bundle_id || null;
+
   const { rows: items } = await query(
-    `SELECT eoi.*, s.name AS service_name, s.price AS service_price, s.min_quantity AS service_min_quantity
+    `SELECT eoi.*,
+            s.name  AS service_name,
+            s.price AS service_price,
+            s.min_quantity AS service_min_quantity,
+            bi.price_per_k AS bundle_price_per_k
        FROM engagement_order_items eoi
        LEFT JOIN services s ON s.id = eoi.service_id
+       LEFT JOIN bundle_items bi ON bi.bundle_id = $2
+                                 AND bi.engagement_type = eoi.engagement_type
       WHERE eoi.engagement_order_id = $1`,
-    [orderId]
+    [orderId, bundleId]
   );
   const itemIds = items.map(i => i.id);
   let runs = [];
@@ -106,6 +118,7 @@ async function buildOrderDetail(orderId) {
   }
   return items.map(item => ({
     ...item,
+    bundle_price_per_k: item.bundle_price_per_k ? Number(item.bundle_price_per_k) : null,
     service: item.service_name ? { name: item.service_name, price: item.service_price, min_quantity: item.service_min_quantity } : null,
     runs: runsByItem[item.id] || [],
   }));

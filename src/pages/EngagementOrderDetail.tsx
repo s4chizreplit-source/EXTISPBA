@@ -856,10 +856,9 @@ export default function EngagementOrderDetail() {
           const item = order?.items?.find((i: any) =>
             i.runs?.some((r: any) => r.id === editingRun?.id)
           );
-          // Use actual bundle rate (what user paid) = eoi.price / eoi.quantity * 1000
-          // Fallback to service.price only if item pricing data is missing
-          if (item?.price && item?.quantity && Number(item.quantity) > 0) {
-            return (Number(item.price) / Number(item.quantity)) * 1000;
+          // Use current bundle price_per_k (what user is charged today)
+          if (item?.bundle_price_per_k && Number(item.bundle_price_per_k) > 0) {
+            return Number(item.bundle_price_per_k);
           }
           return item?.service?.price || 0.1;
         })()}
