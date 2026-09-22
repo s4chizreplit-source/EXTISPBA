@@ -24,7 +24,7 @@ const MAX_BATCH_CAPS = {
 const SERVICE_CONFIGS = {
   views:       { baseIntervalMinutes: 45, intervalVariance: 25, runsPerThousand: 20,  minRunsPerOrder: 25, maxRunsPerOrder: 300, defaultMinQty: 100 },
   likes:       { baseIntervalMinutes: 85, intervalVariance: 45, runsPerThousand: 180, minRunsPerOrder: 10, maxRunsPerOrder: 200, defaultMinQty: 10 },
-  comments:    { baseIntervalMinutes: 150, intervalVariance: 80, runsPerThousand: 250, minRunsPerOrder: 15, maxRunsPerOrder: 150, defaultMinQty: 5 },
+  comments:    { baseIntervalMinutes: 150, intervalVariance: 80, runsPerThousand: 250, minRunsPerOrder: 15, maxRunsPerOrder: 150, defaultMinQty: 1 },
   followers:   { baseIntervalMinutes: 300, intervalVariance: 150, runsPerThousand: 80, minRunsPerOrder: 15, maxRunsPerOrder: 120, defaultMinQty: 10 },
   subscribers: { baseIntervalMinutes: 360, intervalVariance: 180, runsPerThousand: 120, minRunsPerOrder: 12, maxRunsPerOrder: 100, defaultMinQty: 10 },
   retweets:    { baseIntervalMinutes: 70,  intervalVariance: 38,  runsPerThousand: 65,  minRunsPerOrder: 18, maxRunsPerOrder: 150, defaultMinQty: 10 },
@@ -36,7 +36,7 @@ const SERVICE_CONFIGS = {
 };
 
 const PROVIDER_MINIMUMS = {
-  views: 100, likes: 10, comments: 10, saves: 10, shares: 10,
+  views: 100, likes: 10, comments: 1, saves: 10, shares: 10,
   followers: 10, subscribers: 10, retweets: 10, reposts: 10, watch_hours: 10,
 };
 
