@@ -409,7 +409,12 @@ export default function AdminProviderAccounts() {
                               <span className="text-sm font-medium flex items-center gap-1">
                                 <Wallet className="h-3 w-3 text-muted-foreground" />
                                 {account.balance != null
-                                  ? `${Number(account.balance).toFixed(2)} ${account.balance_currency || ""}`
+                                  ? (() => {
+                                      const bal = Number(account.balance);
+                                      const cur = (account.balance_currency || "INR").toUpperCase();
+                                      const inr = cur === "INR" ? bal : bal * 85;
+                                      return `₹${Math.round(inr).toLocaleString("en-IN")}`;
+                                    })()
                                   : "—"}
                               </span>
                               <span className="text-xs text-muted-foreground">

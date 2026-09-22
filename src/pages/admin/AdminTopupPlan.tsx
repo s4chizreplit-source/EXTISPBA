@@ -324,7 +324,12 @@ export default function AdminTopupPlan() {
                               <div className="font-medium">{a.name}</div>
                               <div className="text-[11px] text-muted-foreground">
                                 {a.balance != null
-                                  ? `${Number(a.balance).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${String(a.balance_currency || "").toUpperCase()}`
+                                  ? (() => {
+                                      const bal = Number(a.balance);
+                                      const cur = (a.balance_currency || "INR").toUpperCase();
+                                      const inrVal = cur === "INR" ? bal : bal * 85;
+                                      return `₹${Math.round(inrVal).toLocaleString("en-IN")}`;
+                                    })()
                                   : "never checked"}
                                 {a.last_balance_error && (
                                   <span className="inline-flex items-center gap-1 ml-2 text-destructive">
